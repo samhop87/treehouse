@@ -64,28 +64,46 @@ document.addEventListener('alpine:init', () => {
     }));
 
     // Commit graph renderer
-    Alpine.data('commitGraph', (commits, selectedHash) => ({
-        commits: commits || [],
-        selectedHash: selectedHash,
+    // Reads commits and selectedCommit reactively from Livewire via $wire
+    // so graph stays in sync after Livewire re-renders (wire:ignore.self freezes x-data attrs)
+    Alpine.data('commitGraph', () => ({
         graphWidth: 40,
         nodes: [],
+        _alive: true,
 
         init() {
             this.computeAndDraw();
+
+            // Redraw after every Livewire server roundtrip.
+            // x-effect with $wire properties doesn't reliably re-fire after
+            // DOM morphing, so this acts as a belt-and-suspenders fallback
+            // that fires after ALL successful Livewire updates.
+            Livewire.hook('commit', ({ succeed }) => {
+                succeed(() => {
+                    if (!this._alive) return;
+                    this.$nextTick(() => this.computeAndDraw());
+                });
+            });
+        },
+
+        destroy() {
+            this._alive = false;
         },
 
         updateGraph() {
-            // Re-read commits and selectedHash from Livewire-controlled data
             this.$nextTick(() => this.computeAndDraw());
         },
 
         computeAndDraw() {
-            if (!this.commits || this.commits.length === 0) {
+            const commits = this.$wire.get('commits') || [];
+            const selectedHash = this.$wire.get('selectedCommit');
+
+            if (commits.length === 0) {
                 this.graphWidth = 40;
                 return;
             }
 
-            this.nodes = computeGraphLayout(this.commits);
+            this.nodes = computeGraphLayout(commits);
 
             const canvas = this.$refs.graphCanvas;
             if (!canvas) return;
@@ -96,7 +114,7 @@ document.addEventListener('alpine:init', () => {
                 laneWidth: 16,
                 nodeRadius: 4,
                 padding: 12,
-                selectedHash: this.selectedHash,
+                selectedHash: selectedHash,
             });
 
             if (result) {

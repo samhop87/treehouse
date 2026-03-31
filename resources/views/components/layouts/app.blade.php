@@ -7,14 +7,14 @@
     @vite(['resources/css/app.css', 'resources/js/app.js'])
     @livewireStyles
 </head>
-<body class="h-full bg-zinc-900 text-zinc-100 overflow-hidden select-none">
+<body class="h-full bg-[#0e0e18] text-gray-100 overflow-hidden select-none">
     {{-- Custom title bar (draggable region for frameless window) --}}
     <header
-        class="flex items-center justify-between h-10 px-4 bg-zinc-950 border-b border-zinc-800"
+        class="flex items-center justify-between h-10 px-4 bg-[#06060c] border-b border-[#1e1e32]"
         style="-webkit-app-region: drag;"
     >
         {{-- macOS traffic lights sit in the left ~70px, so add left padding --}}
-        <div class="pl-16 text-sm font-medium text-zinc-400 truncate">
+        <div class="pl-16 text-sm font-medium text-gray-400 truncate">
             {{ $titleBar ?? 'Treehouse' }}
         </div>
         <div class="flex items-center gap-2" style="-webkit-app-region: no-drag;">
@@ -46,7 +46,7 @@
                 class="pointer-events-auto px-4 py-2 rounded-lg shadow-lg text-xs font-medium max-w-xs"
                 :class="toast.type === 'error'
                     ? 'bg-red-900/90 text-red-200 border border-red-800'
-                    : 'bg-zinc-800/90 text-zinc-200 border border-zinc-700'"
+                    : 'bg-[#1a1a2e]/95 text-violet-200 border border-violet-800/50 glow-violet'"
                 x-text="toast.message"
             ></div>
         </template>

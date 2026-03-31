@@ -35,18 +35,18 @@
  */
 
 const LANE_COLORS = [
+    '#a855f7', // purple-500 (neon purple)
+    '#22d3ee', // cyan-400 (neon cyan)
+    '#e879f9', // fuchsia-400 (neon magenta)
+    '#2dd4bf', // teal-400 (neon teal)
+    '#818cf8', // indigo-400
+    '#f472b6', // pink-400 (neon pink)
+    '#38bdf8', // sky-400
+    '#c084fc', // purple-400
     '#34d399', // emerald-400
-    '#60a5fa', // blue-400
-    '#f472b6', // pink-400
-    '#a78bfa', // violet-400
     '#fb923c', // orange-400
     '#facc15', // yellow-400
-    '#2dd4bf', // teal-400
     '#f87171', // red-400
-    '#818cf8', // indigo-400
-    '#4ade80', // green-400
-    '#c084fc', // purple-400
-    '#38bdf8', // sky-400
 ];
 
 /**

@@ -13,3 +13,16 @@
 [x-cloak] {
     display: none !important;
 }
+
+/* Subtle glow effects for neon elements */
+@utility glow-violet {
+    box-shadow: 0 0 8px rgba(139, 92, 246, 0.3), 0 0 24px rgba(139, 92, 246, 0.1);
+}
+
+@utility glow-cyan {
+    box-shadow: 0 0 8px rgba(34, 211, 238, 0.3), 0 0 24px rgba(34, 211, 238, 0.1);
+}
+
+@utility glow-teal {
+    box-shadow: 0 0 8px rgba(45, 212, 191, 0.3), 0 0 24px rgba(45, 212, 191, 0.1);
+}

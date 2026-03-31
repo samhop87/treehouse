@@ -2,8 +2,8 @@
     <div class="text-center space-y-6 max-w-md w-full px-6">
         {{-- Header --}}
         <div>
-            <h1 class="text-2xl font-bold text-zinc-100">Connect to GitHub</h1>
-            <p class="mt-1 text-sm text-zinc-500">
+            <h1 class="text-2xl font-bold text-gray-100">Connect to GitHub</h1>
+            <p class="mt-1 text-sm text-gray-500">
                 Sign in with your GitHub account to clone private repositories.
             </p>
         </div>
@@ -13,7 +13,7 @@
             <div class="space-y-4">
                 <button
                     wire:click="startAuth"
-                    class="w-full px-6 py-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-100 font-medium rounded-lg border border-zinc-700 transition-colors duration-150 cursor-pointer flex items-center justify-center gap-3"
+                    class="w-full px-6 py-3 bg-[#1a1a2e] hover:bg-[#141420] text-gray-100 font-medium rounded-lg border border-[#2a2a42] transition-colors duration-150 cursor-pointer flex items-center justify-center gap-3"
                 >
                     {{-- GitHub icon --}}
                     <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
@@ -22,7 +22,7 @@
                     Sign in with GitHub
                 </button>
 
-                <a href="/" wire:navigate class="text-sm text-zinc-500 hover:text-zinc-400 transition-colors">
+                <a href="/" wire:navigate class="text-sm text-gray-500 hover:text-gray-400 transition-colors">
                     Skip for now
                 </a>
             </div>
@@ -30,7 +30,7 @@
 
         {{-- REQUESTING: Loading --}}
         @if ($state === 'requesting')
-            <div class="flex items-center justify-center gap-3 py-6 text-zinc-400">
+            <div class="flex items-center justify-center gap-3 py-6 text-gray-400">
                 <svg class="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                     <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                     <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
@@ -61,12 +61,12 @@
                 class="space-y-5"
             >
                 <div class="space-y-2">
-                    <p class="text-sm text-zinc-400">Enter this code on GitHub:</p>
+                    <p class="text-sm text-gray-400">Enter this code on GitHub:</p>
                     <div
                         x-data="{ copied: false }"
                         class="relative"
                     >
-                        <div class="bg-zinc-800 border border-zinc-700 rounded-lg px-6 py-4 font-mono text-3xl font-bold text-zinc-100 tracking-[0.3em] select-text">
+                        <div class="bg-[#1a1a2e] border border-violet-800/40 rounded-lg px-6 py-4 font-mono text-3xl font-bold text-gray-100 tracking-[0.3em] select-text glow-violet">
                             {{ $userCode }}
                         </div>
                         <button
@@ -75,7 +75,7 @@
                                 copied = true;
                                 setTimeout(() => copied = false, 2000);
                             "
-                            class="absolute top-2 right-2 px-2 py-1 text-xs text-zinc-400 hover:text-zinc-200 bg-zinc-700 hover:bg-zinc-600 rounded transition-colors cursor-pointer"
+                            class="absolute top-2 right-2 px-2 py-1 text-xs text-gray-400 hover:text-gray-200 bg-[#141420] hover:bg-[#1a1a2e] rounded transition-colors cursor-pointer"
                         >
                             <span x-show="!copied">Copy</span>
                             <span x-show="copied" x-cloak>Copied!</span>
@@ -86,16 +86,16 @@
                 <div class="space-y-3">
                     <button
                         wire:click="openGitHub"
-                        class="w-full px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-lg transition-colors duration-150 cursor-pointer"
+                        class="w-full px-6 py-3 bg-violet-600 hover:bg-violet-500 text-white font-medium rounded-lg transition-colors duration-150 cursor-pointer"
                     >
                         Open GitHub in Browser
                     </button>
-                    <p class="text-xs text-zinc-600">
-                        Or go to <span class="text-zinc-400 font-mono">{{ $verificationUri }}</span>
+                    <p class="text-xs text-gray-600">
+                        Or go to <span class="text-gray-400 font-mono">{{ $verificationUri }}</span>
                     </p>
                 </div>
 
-                <div class="flex items-center justify-center gap-2 py-2 text-zinc-500">
+                <div class="flex items-center justify-center gap-2 py-2 text-gray-500">
                     <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                         <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
@@ -109,19 +109,19 @@
         @if ($state === 'success')
             <div class="space-y-5">
                 <div class="flex items-center justify-center">
-                    <div class="w-12 h-12 bg-emerald-600/20 rounded-full flex items-center justify-center">
-                        <svg class="w-6 h-6 text-emerald-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <div class="w-12 h-12 bg-violet-600/20 rounded-full flex items-center justify-center">
+                        <svg class="w-6 h-6 text-violet-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
                         </svg>
                     </div>
                 </div>
                 <div>
-                    <p class="text-lg font-medium text-zinc-100">Connected to GitHub</p>
-                    <p class="text-sm text-zinc-500 mt-1">You can now clone private repositories.</p>
+                    <p class="text-lg font-medium text-gray-100">Connected to GitHub</p>
+                    <p class="text-sm text-gray-500 mt-1">You can now clone private repositories.</p>
                 </div>
                 <button
                     wire:click="goToLanding"
-                    class="w-full px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-lg transition-colors duration-150 cursor-pointer"
+                    class="w-full px-6 py-3 bg-violet-600 hover:bg-violet-500 text-white font-medium rounded-lg transition-colors duration-150 cursor-pointer"
                 >
                     Continue
                 </button>
@@ -144,11 +144,11 @@
                 <div class="flex flex-col gap-2">
                     <button
                         wire:click="retry"
-                        class="w-full px-6 py-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-medium rounded-lg border border-zinc-700 transition-colors duration-150 cursor-pointer"
+                        class="w-full px-6 py-3 bg-[#1a1a2e] hover:bg-[#141420] text-gray-200 font-medium rounded-lg border border-[#2a2a42] transition-colors duration-150 cursor-pointer"
                     >
                         Try Again
                     </button>
-                    <a href="/" wire:navigate class="text-sm text-zinc-500 hover:text-zinc-400 transition-colors">
+                    <a href="/" wire:navigate class="text-sm text-gray-500 hover:text-gray-400 transition-colors">
                         Back to Home
                     </a>
                 </div>
