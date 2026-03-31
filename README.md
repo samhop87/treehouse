@@ -1,59 +1,118 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
-
 <p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
+<strong>Treehouse</strong><br>
+A Mac-first desktop Git client
 </p>
 
-## About Laravel
+<p align="center">
+<img src="https://img.shields.io/badge/build-passing-brightgreen" alt="Build Status">
+<img src="https://img.shields.io/badge/tests-211%20passed-brightgreen" alt="Tests">
+<img src="https://img.shields.io/badge/version-0.1.0--dev-blue" alt="Latest Stable Version">
+<img src="https://img.shields.io/badge/license-MIT-green" alt="License">
+</p>
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+## About
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+Treehouse is a native macOS desktop Git client built with Laravel 12, NativePHP Desktop v2, Livewire 3, Alpine.js, and Tailwind CSS. It uses the system `git` CLI under the hood and connects to GitHub for authentication and repository management.
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+## Features
 
-## Learning Laravel
+- **Visual commit graph** rendered on HTML Canvas with bezier curves and lane-based layout
+- **Full staging workflow** -- stage, unstage, discard, and commit with inline diffs
+- **Branch operations** -- create, checkout, delete, merge with conflict detection
+- **Tag management** -- first-class UI for lightweight and annotated tags (create, delete, push)
+- **Stash operations** -- stash, apply, pop, drop with named stash support
+- **Remote sync** -- fetch, pull, push with async progress via NativePHP ChildProcess
+- **GitHub device flow auth** -- OAuth login without needing a server callback
+- **Repo picker** -- clone any of your GitHub repos from a filterable dropdown
+- **Diff viewer** -- unified diff view for staged, unstaged, and commit diffs
+- **Commit detail panel** -- view full commit metadata, parent hashes, and diffs
+- **Keyboard shortcuts** -- Cmd+R (refresh), Cmd+Enter (commit), Cmd+Shift+F/L/P (focus panels)
+- **Auto-refresh** -- repo data refreshes on window focus
+- **Copy actions** -- click-to-copy on commit hashes, branch names, and tag names
+- **Toast notifications** -- success/error feedback for all operations
+- **Resizable sidebar** -- draggable panel divider with min/max constraints
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework. You can also check out [Laravel Learn](https://laravel.com/learn), where you will be guided through building a modern Laravel application.
+## Tech Stack
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+| Layer | Technology |
+|-------|------------|
+| Framework | Laravel 12 |
+| Desktop Runtime | NativePHP Desktop v2 |
+| Frontend | Livewire 3 + Alpine.js |
+| Styling | Tailwind CSS 4 |
+| Graph Renderer | HTML Canvas |
+| Git | System `git` CLI via Symfony Process |
+| Auth | GitHub Device Flow OAuth |
+| Database | SQLite (NativePHP managed) |
 
-## Laravel Sponsors
+## Requirements
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+- macOS
+- PHP 8.2+
+- Node.js 18+
+- Git
+- Composer
 
-### Premium Partners
+## Setup
 
-- **[Vehikl](https://vehikl.com)**
-- **[Tighten Co.](https://tighten.co)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Redberry](https://redberry.international/laravel-development)**
-- **[Active Logic](https://activelogic.com)**
+```bash
+# Install dependencies
+composer install
+npm install
 
-## Contributing
+# Copy environment file
+cp .env.example .env
+php artisan key:generate
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+# Add your GitHub OAuth app client ID to .env
+# GITHUB_CLIENT_ID=your_client_id
 
-## Code of Conduct
+# Run database migrations
+php artisan migrate
+php artisan native:migrate
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+# Build frontend assets
+npm run build
 
-## Security Vulnerabilities
+# Run the native app
+php artisan native:run
+```
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+## Development
+
+```bash
+# Run with Vite dev server (hot reload for CSS/JS)
+npm run dev
+
+# Run tests
+php artisan test
+
+# Run the app in browser (limited -- no NativePHP features)
+php artisan serve
+```
+
+## Architecture
+
+```
+app/
+  DTOs/              # Value objects for Git data (Commit, Branch, Tag, FileStatus, etc.)
+  Services/
+    Git/             # Git CLI wrapper, parsers, error translation
+    GitHub/          # Device flow auth, repo listing
+  Livewire/          # UI components (RepoView, Landing, CloneRepo, GitHubLogin)
+  Events/            # NativePHP menu events
+  Providers/         # NativeAppServiceProvider (menu, window config)
+resources/
+  js/commit-graph.js # Canvas-based commit graph renderer
+  views/livewire/    # Blade templates for each component
+```
+
+The Git layer never uses libgit2 or any Git reimplementation. Every operation runs through `GitCommandRunner`, which executes `git` commands via Symfony Process and pipes output through dedicated parsers that return typed DTOs.
+
+```bash
+php artisan test
+```
 
 ## License
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+MIT
