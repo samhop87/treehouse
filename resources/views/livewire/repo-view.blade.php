@@ -75,7 +75,7 @@
         </div>
 
         <div class="flex-1 overflow-y-auto">
-            <div x-show="sidebarTab === 'branches'" x-cloak x-data="{ branchSection: 'local' }" class="py-2">
+            <div x-show="sidebarTab === 'branches'" x-cloak x-data="{ branchSection: null }" class="py-2">
                 <div class="px-3 pb-2">
                     @if ($showCreateBranch)
                         <div class="rounded-lg border border-[#1e1e32] bg-[#11111b] p-2">
@@ -182,9 +182,10 @@
                         <div x-show="branchSection === 'local'" x-collapse class="border-t border-[#1e1e32] p-2">
                             @foreach ($localBranches as $branch)
                                 <div
+                                    wire:click="selectBranch('{{ $branch['name'] }}')"
                                     @if (! $branch['isCurrent']) wire:dblclick="checkoutLocalBranch('{{ $branch['name'] }}')" @endif
-                                    class="group mb-1 rounded-md border px-2 py-1.5 text-xs transition-colors {{ $branch['isCurrent'] ? 'border-violet-700/30 bg-violet-900/20 text-gray-100' : 'border-transparent text-gray-400 hover:bg-[#1a1a2e]/50 hover:text-gray-300 cursor-pointer' }}"
-                                    title="{{ $branch['isCurrent'] ? 'Current branch' : 'Double-click to switch branches' }}"
+                                    class="group mb-1 rounded-md border px-2 py-1.5 text-xs transition-colors cursor-pointer {{ $selectedHistoryType === 'branch' && $selectedBranch === $branch['name'] ? 'border-violet-600/50 bg-violet-900/30 text-gray-100' : ($branch['isCurrent'] ? 'border-violet-700/30 bg-violet-900/20 text-gray-100 hover:bg-violet-900/25' : 'border-transparent text-gray-400 hover:bg-[#1a1a2e]/50 hover:text-gray-300') }}"
+                                    title="{{ $branch['isCurrent'] ? 'Click to inspect this branch' : 'Click to inspect this branch. Double-click to switch branches.' }}"
                                 >
                                     <div class="flex items-center gap-1.5">
                                         @if ($branch['isCurrent'])
@@ -215,7 +216,7 @@
                                         </button>
                                         @if (! $branch['isCurrent'])
                                             <button
-                                                wire:click="openMerge('{{ $branch['name'] }}')"
+                                                wire:click.stop="openMerge('{{ $branch['name'] }}')"
                                                 class="rounded p-0.5 text-gray-600 hover:text-violet-400 cursor-pointer"
                                                 title="Merge into {{ $currentBranch }}"
                                             >
@@ -224,7 +225,7 @@
                                                 </svg>
                                             </button>
                                             <button
-                                                wire:click="deleteBranch('{{ $branch['name'] }}')"
+                                                wire:click.stop="deleteBranch('{{ $branch['name'] }}')"
                                                 wire:confirm="Delete branch '{{ $branch['name'] }}'?"
                                                 class="rounded p-0.5 text-gray-600 hover:text-red-400 cursor-pointer"
                                                 title="Delete branch"
@@ -264,9 +265,10 @@
                             <div x-show="branchSection === 'remote'" x-collapse class="border-t border-[#1e1e32] p-2">
                                 @foreach ($remoteBranches as $branch)
                                     <div
+                                        wire:click="selectBranch('{{ $branch['name'] }}')"
                                         wire:dblclick="checkoutRemoteBranch('{{ $branch['name'] }}')"
-                                        class="mb-1 flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs text-gray-500 transition-colors hover:bg-[#1a1a2e]/50 hover:text-gray-300 cursor-pointer"
-                                        title="Double-click to checkout a local tracking branch"
+                                        class="mb-1 flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs transition-colors cursor-pointer {{ $selectedHistoryType === 'branch' && $selectedBranch === $branch['name'] ? 'bg-violet-900/25 text-gray-200' : 'text-gray-500 hover:bg-[#1a1a2e]/50 hover:text-gray-300' }}"
+                                        title="Click to inspect this branch. Double-click to checkout a local tracking branch."
                                     >
                                         <svg class="h-3 w-3 shrink-0 text-gray-700" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                                             <path stroke-linecap="round" stroke-linejoin="round" d="M6 3v12m0 0a3 3 0 103 3 3 3 0 00-3-3zm12-6a3 3 0 10-3-3 3 3 0 003 3zm0 0v2a2 2 0 01-2 2H9"/>
@@ -590,56 +592,43 @@
 
             <div class="flex-1 min-h-0 flex overflow-hidden" x-data="repoLayout()">
                 <div class="flex-1 min-w-0 overflow-hidden bg-[#06060c]">
-                    @if ($selectedFile || $selectedCommitData)
+                    @if ($selectedFile)
                         <div class="flex h-full flex-col overflow-hidden">
                             <div class="border-b border-[#1e1e32] bg-[#0e0e18] px-4 py-3">
                                 <div class="flex items-start justify-between gap-4">
                                     <div class="min-w-0 flex-1">
-                                        @if ($selectedCommitData)
-                                            <div class="mb-2 text-sm text-gray-200 whitespace-pre-wrap">{{ $selectedCommitData['message'] }}</div>
-                                            <div class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+                                        @if ($selectedHistoryType === 'commit' && $selectedCommitData)
+                                            <div class="text-[10px] uppercase tracking-[0.2em] text-gray-600">Commit Diff</div>
+                                            <div class="mt-1 text-sm text-gray-200 whitespace-pre-wrap">{{ $selectedCommitData['message'] }}</div>
+                                            <div class="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+                                                <span class="text-gray-600">Commit</span>
+                                                <span
+                                                    class="cursor-pointer font-mono text-gray-400 transition-colors hover:text-gray-200"
+                                                    x-on:click="navigator.clipboard.writeText('{{ $selectedCommitData['hash'] }}'); $dispatch('toast', { message: 'Hash copied', type: 'success' })"
+                                                    title="Click to copy hash"
+                                                >{{ $selectedCommitData['hash'] }}</span>
+
                                                 <span class="text-gray-600">Author</span>
                                                 <span class="text-gray-400">{{ $selectedCommitData['author'] }} <span class="text-gray-600">&lt;{{ $selectedCommitData['email'] }}&gt;</span></span>
 
                                                 <span class="text-gray-600">Date</span>
                                                 <span class="text-gray-400">{{ \Carbon\Carbon::parse($selectedCommitData['date'])->format('M j, Y g:i A') }} <span class="text-gray-600">({{ $selectedCommitData['dateHuman'] }})</span></span>
 
-                                                <span class="text-gray-600">Commit</span>
-                                                <span
-                                                    class="cursor-pointer font-mono text-gray-500 transition-colors hover:text-gray-300"
-                                                    x-on:click="navigator.clipboard.writeText('{{ $selectedCommitData['hash'] }}'); $dispatch('toast', { message: 'Hash copied', type: 'success' })"
-                                                    title="Click to copy hash"
-                                                >{{ $selectedCommitData['hash'] }}</span>
+                                                <span class="text-gray-600">File</span>
+                                                <span class="truncate text-gray-200">{{ $selectedFile }}</span>
+                                            </div>
+                                        @elseif ($selectedHistoryType === 'branch' && $selectedBranchData)
+                                            <div class="text-[10px] uppercase tracking-[0.2em] text-gray-600">Branch Diff</div>
+                                            <div class="mt-1 flex flex-wrap items-center gap-2">
+                                                <span class="rounded border border-violet-800/50 bg-violet-900/30 px-2 py-0.5 text-xs text-violet-300">{{ $selectedBranchData['name'] }}</span>
+                                                <span class="rounded border border-[#2a2a42] bg-[#1a1a2e] px-2 py-0.5 text-[10px] uppercase tracking-[0.15em] text-gray-500">{{ $selectedBranchData['isRemote'] ? 'Remote' : 'Local' }}</span>
+                                            </div>
+                                            <div class="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+                                                <span class="text-gray-600">Compared To</span>
+                                                <span class="text-gray-400">{{ $isDetached ? 'HEAD' : ($currentBranch ?? 'HEAD') }}</span>
 
-                                                @if (count($selectedCommitData['parents']) > 0)
-                                                    <span class="text-gray-600">{{ count($selectedCommitData['parents']) > 1 ? 'Parents' : 'Parent' }}</span>
-                                                    <span class="flex items-center gap-1.5 font-mono text-gray-500">
-                                                        @foreach ($selectedCommitData['parents'] as $parent)
-                                                            <span
-                                                                class="cursor-pointer transition-colors hover:text-gray-300"
-                                                                x-on:click="navigator.clipboard.writeText('{{ $parent }}'); $dispatch('toast', { message: 'Parent hash copied', type: 'success' })"
-                                                                title="Click to copy parent hash"
-                                                            >{{ substr($parent, 0, 7) }}</span>
-                                                        @endforeach
-                                                    </span>
-                                                @endif
-
-                                                @if (count($selectedCommitData['refs']) > 0)
-                                                    <span class="text-gray-600">Refs</span>
-                                                    <div class="flex flex-wrap items-center gap-1">
-                                                        @foreach ($selectedCommitData['refs'] as $ref)
-                                                            @if (str_starts_with($ref, 'tag:'))
-                                                                <span class="rounded border border-teal-800/50 bg-teal-900/40 px-1.5 py-0.5 text-[10px] text-teal-400">{{ trim(str_replace('tag:', '', $ref)) }}</span>
-                                                            @elseif (str_contains($ref, 'HEAD'))
-                                                                <span class="rounded border border-cyan-800/50 bg-cyan-900/40 px-1.5 py-0.5 text-[10px] text-cyan-400">{{ $ref }}</span>
-                                                            @elseif (str_contains($ref, '/'))
-                                                                <span class="rounded border border-[#2a2a42] bg-[#1a1a2e] px-1.5 py-0.5 text-[10px] text-gray-400">{{ $ref }}</span>
-                                                            @else
-                                                                <span class="rounded border border-violet-800/50 bg-violet-900/40 px-1.5 py-0.5 text-[10px] text-violet-400">{{ $ref }}</span>
-                                                            @endif
-                                                        @endforeach
-                                                    </div>
-                                                @endif
+                                                <span class="text-gray-600">File</span>
+                                                <span class="truncate text-gray-200">{{ $selectedFile }}</span>
                                             </div>
                                         @else
                                             <div class="text-[10px] uppercase tracking-[0.2em] text-gray-600">
@@ -650,10 +639,10 @@
                                     </div>
 
                                     <button
-                                        wire:click="clearSelection"
+                                        wire:click="clearFileSelection"
                                         class="shrink-0 rounded border border-[#2a2a42] bg-[#1a1a2e] px-2 py-1 text-xs text-gray-400 transition-colors hover:bg-[#202035] hover:text-gray-200 cursor-pointer"
                                     >
-                                        Back to history
+                                        {{ $selectedHistoryType ? 'Back to files' : 'Back to changes' }}
                                     </button>
                                 </div>
                             </div>
@@ -697,10 +686,8 @@
                                             @endforeach
                                         @endif
                                     @endforeach
-                                @elseif ($selectedFile)
-                                    <div class="flex h-full items-center justify-center text-sm text-gray-600">No diff available</div>
                                 @else
-                                    <div class="flex h-full items-center justify-center text-sm text-gray-600">No changes in this commit</div>
+                                    <div class="flex h-full items-center justify-center text-sm text-gray-600">No diff available</div>
                                 @endif
                             </div>
                         </div>
@@ -718,20 +705,30 @@
                                     @foreach ($commits as $commit)
                                         <div
                                             wire:click="selectCommit('{{ $commit['hash'] }}')"
-                                            class="flex h-7 cursor-pointer items-center transition-colors hover:bg-[#1a1a2e]/30"
+                                            wire:dblclick="checkoutCommit('{{ $commit['hash'] }}')"
+                                            class="flex h-7 cursor-pointer items-center transition-colors hover:bg-[#1a1a2e]/30 {{ $selectedHistoryType === 'commit' && $selectedCommit === $commit['hash'] ? 'bg-violet-900/20' : '' }}"
+                                            title="Click to inspect changed files. Double-click to checkout this commit."
                                         >
                                             <div class="shrink-0" :style="'width:' + graphWidth + 'px'"></div>
 
                                             <div class="flex shrink-0 items-center gap-1 px-1">
                                                 @foreach ($commit['refs'] as $ref)
-                                                    @if (str_starts_with($ref, 'tag:'))
+                                                    @php
+                                                        $graphRefIsTag = str_starts_with($ref, 'tag:');
+                                                        $graphRefIsPointer = $ref === 'HEAD' || str_ends_with($ref, '/HEAD');
+                                                    @endphp
+
+                                                    @if ($graphRefIsTag)
                                                         <span class="whitespace-nowrap rounded border border-teal-800/50 bg-teal-900/40 px-1.5 py-0.5 text-[10px] text-teal-400">{{ trim(str_replace('tag:', '', $ref)) }}</span>
-                                                    @elseif (str_contains($ref, 'HEAD'))
+                                                    @elseif ($graphRefIsPointer)
                                                         <span class="whitespace-nowrap rounded border border-cyan-800/50 bg-cyan-900/40 px-1.5 py-0.5 text-[10px] text-cyan-400">{{ $ref }}</span>
-                                                    @elseif (str_contains($ref, '/'))
-                                                        <span class="whitespace-nowrap rounded border border-[#2a2a42] bg-[#1a1a2e] px-1.5 py-0.5 text-[10px] text-gray-400">{{ $ref }}</span>
                                                     @else
-                                                        <span class="whitespace-nowrap rounded border border-violet-800/50 bg-violet-900/40 px-1.5 py-0.5 text-[10px] text-violet-400">{{ $ref }}</span>
+                                                        <button
+                                                            wire:click.stop="selectGraphRef('{{ $ref }}')"
+                                                            wire:dblclick.stop="checkoutGraphRef('{{ $ref }}')"
+                                                            class="whitespace-nowrap rounded border px-1.5 py-0.5 text-[10px] transition-colors cursor-pointer {{ str_contains($ref, 'HEAD') ? 'border-cyan-800/50 bg-cyan-900/40 text-cyan-400 hover:bg-cyan-900/50' : (str_contains($ref, '/') ? 'border-[#2a2a42] bg-[#1a1a2e] text-gray-400 hover:bg-[#202035] hover:text-gray-200' : 'border-violet-800/50 bg-violet-900/40 text-violet-400 hover:bg-violet-900/50') }}"
+                                                            title="Click to inspect this branch. Double-click to check it out."
+                                                        >{{ $ref }}</button>
                                                     @endif
                                                 @endforeach
                                             </div>
@@ -774,169 +771,254 @@
                     class="shrink-0 border-l border-[#1e1e32] bg-[#0a0a12] flex flex-col overflow-hidden"
                     :style="'width:' + sidebarWidth + 'px'"
                 >
-                    <div class="border-b border-[#1e1e32] px-4 py-3">
-                        <div class="flex items-center justify-between gap-3">
-                            <div>
-                                <div class="text-sm text-gray-100">
-                                    {{ $totalFileChanges }} file change{{ $totalFileChanges === 1 ? '' : 's' }}
-                                </div>
-                                <div class="text-xs text-gray-600">
-                                    {{ $isDetached ? 'Detached HEAD' : 'on ' . ($currentBranch ?? 'Unknown') }}
-                                </div>
-                            </div>
-                            @if ($unstagedTotal > 0)
-                                <button
-                                    wire:click="stageAll"
-                                    class="rounded border border-teal-700/40 px-2 py-1 text-[10px] font-medium text-teal-300 transition-colors hover:bg-teal-900/20 cursor-pointer"
-                                >
-                                    Stage All
-                                </button>
-                            @endif
-                        </div>
-                    </div>
-
-                    <div class="flex-1 min-h-0 overflow-y-auto">
+                    @if ($selectedHistoryType)
                         <div class="border-b border-[#1e1e32] px-4 py-3">
-                            <div class="mb-2 flex items-center justify-between">
-                                <div class="text-xs font-semibold uppercase tracking-[0.2em] text-gray-500">
-                                    Unstaged Files ({{ $unstagedTotal }})
+                            <div class="flex items-start justify-between gap-3">
+                                <div class="min-w-0 flex-1">
+                                    @if ($selectedHistoryType === 'commit' && $selectedCommitData)
+                                        <div class="text-[10px] font-semibold uppercase tracking-[0.2em] text-gray-500">Commit Files</div>
+                                        <div class="mt-1 text-sm text-gray-100 whitespace-pre-wrap">{{ $selectedCommitData['message'] }}</div>
+                                        <div class="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-gray-500">
+                                            <span class="font-mono text-gray-400">{{ $selectedCommitData['shortHash'] }}</span>
+                                            <span>{{ $selectedCommitData['author'] }}</span>
+                                            <span>{{ $selectedCommitData['dateHuman'] }}</span>
+                                        </div>
+                                    @elseif ($selectedHistoryType === 'branch' && $selectedBranchData)
+                                        <div class="text-[10px] font-semibold uppercase tracking-[0.2em] text-gray-500">Branch Files</div>
+                                        <div class="mt-1 flex flex-wrap items-center gap-2">
+                                            <span class="rounded border border-violet-800/50 bg-violet-900/30 px-2 py-0.5 text-xs text-violet-300">{{ $selectedBranchData['name'] }}</span>
+                                            <span class="rounded border border-[#2a2a42] bg-[#1a1a2e] px-2 py-0.5 text-[10px] uppercase tracking-[0.15em] text-gray-500">{{ $selectedBranchData['isRemote'] ? 'Remote' : 'Local' }}</span>
+                                        </div>
+                                        <div class="mt-2 text-xs text-gray-600">Showing changes relative to {{ $isDetached ? 'HEAD' : ($currentBranch ?? 'HEAD') }}</div>
+                                    @endif
                                 </div>
+
+                                <button
+                                    wire:click="clearSelection"
+                                    class="shrink-0 rounded border border-[#2a2a42] bg-[#1a1a2e] px-2 py-1 text-xs text-gray-400 transition-colors hover:bg-[#202035] hover:text-gray-200 cursor-pointer"
+                                >
+                                    Working Tree
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="flex-1 min-h-0 overflow-y-auto px-4 py-3">
+                            <div class="mb-3 flex items-center justify-between text-xs text-gray-500">
+                                <span>{{ count($selectedHistoryDiffs) }} changed file{{ count($selectedHistoryDiffs) === 1 ? '' : 's' }}</span>
+                                <span>Click a file to open its diff</span>
                             </div>
 
                             <div class="space-y-1">
-                                @forelse ($conflictedFiles as $file)
-                                    <div
-                                        wire:click="selectFile('{{ $file['path'] }}')"
-                                        class="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-xs transition-colors hover:bg-[#1a1a2e]/50 {{ $selectedFile === $file['path'] && ! $selectedFileStaged ? 'bg-violet-900/20' : '' }}"
-                                    >
-                                        <span class="w-2 shrink-0 text-red-500">!</span>
-                                        <span class="min-w-0 flex-1 truncate text-red-400">{{ $file['path'] }}</span>
-                                    </div>
-                                @empty
-                                @endforelse
+                                @forelse ($selectedHistoryDiffs as $diff)
+                                    @php
+                                        $historyStatusColor = match ($diff['status']) {
+                                            'added' => 'text-teal-400',
+                                            'deleted' => 'text-red-400',
+                                            'renamed', 'copied' => 'text-cyan-400',
+                                            default => 'text-violet-300',
+                                        };
+                                    @endphp
 
-                                @foreach ($unstagedFiles as $file)
-                                    <div
-                                        wire:click="selectFile('{{ $file['path'] }}')"
-                                        class="group flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-xs transition-colors hover:bg-[#1a1a2e]/50 {{ $selectedFile === $file['path'] && ! $selectedFileStaged ? 'bg-violet-900/20' : '' }}"
+                                    <button
+                                        wire:click="selectHistoryFile('{{ $diff['path'] }}')"
+                                        class="flex w-full items-center gap-3 rounded px-2 py-2 text-left transition-colors cursor-pointer {{ $selectedFile === $diff['path'] ? 'bg-violet-900/20' : 'hover:bg-[#1a1a2e]/50' }}"
                                     >
-                                        <span class="w-2 shrink-0 text-cyan-500">{{ substr($file['workStatus'], 0, 1) }}</span>
-                                        <span class="min-w-0 flex-1 truncate text-gray-400">{{ $file['path'] }}</span>
-                                        <div class="ml-auto flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                                        <span class="w-3 shrink-0 text-center text-[10px] font-semibold {{ $historyStatusColor }}">
+                                            {{ strtoupper(substr($diff['status'], 0, 1)) }}
+                                        </span>
+
+                                        <div class="min-w-0 flex-1">
+                                            <div class="truncate text-xs {{ $selectedFile === $diff['path'] ? 'text-gray-100' : 'text-gray-300' }}">{{ $diff['path'] }}</div>
+                                            @if ($diff['oldPath'])
+                                                <div class="truncate text-[10px] text-gray-600">&#8592; {{ $diff['oldPath'] }}</div>
+                                            @endif
+                                        </div>
+
+                                        <div class="shrink-0 text-right text-[10px]">
+                                            @if ($diff['additions'] > 0)
+                                                <span class="text-teal-400">+{{ $diff['additions'] }}</span>
+                                            @endif
+                                            @if ($diff['deletions'] > 0)
+                                                <span class="ml-1 text-red-500">-{{ $diff['deletions'] }}</span>
+                                            @endif
+                                        </div>
+                                    </button>
+                                @empty
+                                    <div class="rounded border border-dashed border-[#1e1e32] px-3 py-4 text-center text-xs italic text-gray-600">
+                                        No file changes found for this {{ $selectedHistoryType }}
+                                    </div>
+                                @endforelse
+                            </div>
+                        </div>
+
+                        <div class="border-t border-[#1e1e32] px-4 py-3 text-[10px] text-gray-600">
+                            Double-click the selected {{ $selectedHistoryType }} to check it out.
+                        </div>
+                    @else
+                        <div class="border-b border-[#1e1e32] px-4 py-3">
+                            <div class="flex items-center justify-between gap-3">
+                                <div>
+                                    <div class="text-sm text-gray-100">
+                                        {{ $totalFileChanges }} file change{{ $totalFileChanges === 1 ? '' : 's' }}
+                                    </div>
+                                    <div class="text-xs text-gray-600">
+                                        {{ $isDetached ? 'Detached HEAD' : 'on ' . ($currentBranch ?? 'Unknown') }}
+                                    </div>
+                                </div>
+                                @if ($unstagedTotal > 0)
+                                    <button
+                                        wire:click="stageAll"
+                                        class="rounded border border-teal-700/40 px-2 py-1 text-[10px] font-medium text-teal-300 transition-colors hover:bg-teal-900/20 cursor-pointer"
+                                    >
+                                        Stage All
+                                    </button>
+                                @endif
+                            </div>
+                        </div>
+
+                        <div class="flex-1 min-h-0 overflow-y-auto">
+                            <div class="border-b border-[#1e1e32] px-4 py-3">
+                                <div class="mb-2 flex items-center justify-between">
+                                    <div class="text-xs font-semibold uppercase tracking-[0.2em] text-gray-500">
+                                        Unstaged Files ({{ $unstagedTotal }})
+                                    </div>
+                                </div>
+
+                                <div class="space-y-1">
+                                    @forelse ($conflictedFiles as $file)
+                                        <div
+                                            wire:click="selectFile('{{ $file['path'] }}')"
+                                            class="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-xs transition-colors hover:bg-[#1a1a2e]/50 {{ $selectedFile === $file['path'] && ! $selectedFileStaged ? 'bg-violet-900/20' : '' }}"
+                                        >
+                                            <span class="w-2 shrink-0 text-red-500">!</span>
+                                            <span class="min-w-0 flex-1 truncate text-red-400">{{ $file['path'] }}</span>
+                                        </div>
+                                    @empty
+                                    @endforelse
+
+                                    @foreach ($unstagedFiles as $file)
+                                        <div
+                                            wire:click="selectFile('{{ $file['path'] }}')"
+                                            class="group flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-xs transition-colors hover:bg-[#1a1a2e]/50 {{ $selectedFile === $file['path'] && ! $selectedFileStaged ? 'bg-violet-900/20' : '' }}"
+                                        >
+                                            <span class="w-2 shrink-0 text-cyan-500">{{ substr($file['workStatus'], 0, 1) }}</span>
+                                            <span class="min-w-0 flex-1 truncate text-gray-400">{{ $file['path'] }}</span>
+                                            <div class="ml-auto flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                                                <button
+                                                    wire:click.stop="stageFile('{{ $file['path'] }}')"
+                                                    class="rounded p-0.5 text-gray-600 hover:text-violet-400 cursor-pointer"
+                                                    title="Stage"
+                                                >
+                                                    <svg class="h-3 w-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/>
+                                                    </svg>
+                                                </button>
+                                                <button
+                                                    wire:click.stop="discardFile('{{ $file['path'] }}')"
+                                                    wire:confirm="Discard changes to {{ $file['path'] }}?"
+                                                    class="rounded p-0.5 text-gray-600 hover:text-red-400 cursor-pointer"
+                                                    title="Discard"
+                                                >
+                                                    <svg class="h-3 w-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                                        <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+                                                    </svg>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    @endforeach
+
+                                    @foreach ($untrackedFiles as $file)
+                                        <div
+                                            wire:click="selectFile('{{ $file['path'] }}')"
+                                            class="group flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-xs transition-colors hover:bg-[#1a1a2e]/50 {{ $selectedFile === $file['path'] && ! $selectedFileStaged ? 'bg-violet-900/20' : '' }}"
+                                        >
+                                            <span class="w-2 shrink-0 text-gray-600">?</span>
+                                            <span class="min-w-0 flex-1 truncate text-gray-500">{{ $file['path'] }}</span>
                                             <button
                                                 wire:click.stop="stageFile('{{ $file['path'] }}')"
-                                                class="rounded p-0.5 text-gray-600 hover:text-violet-400 cursor-pointer"
+                                                class="ml-auto rounded p-0.5 opacity-0 text-gray-600 transition-opacity group-hover:opacity-100 hover:text-violet-400 cursor-pointer"
                                                 title="Stage"
                                             >
                                                 <svg class="h-3 w-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                                                     <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/>
                                                 </svg>
                                             </button>
+                                        </div>
+                                    @endforeach
+
+                                    @if ($unstagedTotal === 0)
+                                        <div class="rounded border border-dashed border-[#1e1e32] px-3 py-4 text-center text-xs italic text-gray-600">
+                                            No unstaged files
+                                        </div>
+                                    @endif
+                                </div>
+                            </div>
+
+                            <div class="px-4 py-3">
+                                <div class="mb-2 flex items-center justify-between">
+                                    <div class="text-xs font-semibold uppercase tracking-[0.2em] text-gray-500">
+                                        Staged Files ({{ count($stagedFiles) }})
+                                    </div>
+                                    @if (count($stagedFiles) > 0)
+                                        <button
+                                            wire:click="unstageAll"
+                                            class="text-[10px] text-gray-600 transition-colors hover:text-gray-400 cursor-pointer"
+                                        >
+                                            Unstage all
+                                        </button>
+                                    @endif
+                                </div>
+
+                                <div class="space-y-1">
+                                    @forelse ($stagedFiles as $file)
+                                        <div
+                                            wire:click="selectFile('{{ $file['path'] }}', true)"
+                                            class="group flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-xs transition-colors hover:bg-[#1a1a2e]/50 {{ $selectedFile === $file['path'] && $selectedFileStaged ? 'bg-violet-900/20' : '' }}"
+                                        >
+                                            <span class="w-2 shrink-0 text-teal-400">{{ substr($file['indexStatus'], 0, 1) }}</span>
+                                            <span class="min-w-0 flex-1 truncate text-gray-400">{{ $file['path'] }}</span>
                                             <button
-                                                wire:click.stop="discardFile('{{ $file['path'] }}')"
-                                                wire:confirm="Discard changes to {{ $file['path'] }}?"
-                                                class="rounded p-0.5 text-gray-600 hover:text-red-400 cursor-pointer"
-                                                title="Discard"
+                                                wire:click.stop="unstageFile('{{ $file['path'] }}')"
+                                                class="ml-auto rounded p-0.5 opacity-0 text-gray-600 transition-opacity group-hover:opacity-100 hover:text-gray-300 cursor-pointer"
+                                                title="Unstage"
                                             >
                                                 <svg class="h-3 w-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                                                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+                                                    <path stroke-linecap="round" stroke-linejoin="round" d="M20 12H4"/>
                                                 </svg>
                                             </button>
                                         </div>
-                                    </div>
-                                @endforeach
-
-                                @foreach ($untrackedFiles as $file)
-                                    <div
-                                        wire:click="selectFile('{{ $file['path'] }}')"
-                                        class="group flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-xs transition-colors hover:bg-[#1a1a2e]/50 {{ $selectedFile === $file['path'] && ! $selectedFileStaged ? 'bg-violet-900/20' : '' }}"
-                                    >
-                                        <span class="w-2 shrink-0 text-gray-600">?</span>
-                                        <span class="min-w-0 flex-1 truncate text-gray-500">{{ $file['path'] }}</span>
-                                        <button
-                                            wire:click.stop="stageFile('{{ $file['path'] }}')"
-                                            class="ml-auto rounded p-0.5 opacity-0 text-gray-600 transition-opacity group-hover:opacity-100 hover:text-violet-400 cursor-pointer"
-                                            title="Stage"
-                                        >
-                                            <svg class="h-3 w-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                                                <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/>
-                                            </svg>
-                                        </button>
-                                    </div>
-                                @endforeach
-
-                                @if ($unstagedTotal === 0)
-                                    <div class="rounded border border-dashed border-[#1e1e32] px-3 py-4 text-center text-xs italic text-gray-600">
-                                        No unstaged files
-                                    </div>
-                                @endif
-                            </div>
-                        </div>
-
-                        <div class="px-4 py-3">
-                            <div class="mb-2 flex items-center justify-between">
-                                <div class="text-xs font-semibold uppercase tracking-[0.2em] text-gray-500">
-                                    Staged Files ({{ count($stagedFiles) }})
+                                    @empty
+                                        <div class="rounded border border-dashed border-[#1e1e32] px-3 py-4 text-center text-xs italic text-gray-600">
+                                            Nothing staged
+                                        </div>
+                                    @endforelse
                                 </div>
-                                @if (count($stagedFiles) > 0)
-                                    <button
-                                        wire:click="unstageAll"
-                                        class="text-[10px] text-gray-600 transition-colors hover:text-gray-400 cursor-pointer"
-                                    >
-                                        Unstage all
-                                    </button>
-                                @endif
-                            </div>
-
-                            <div class="space-y-1">
-                                @forelse ($stagedFiles as $file)
-                                    <div
-                                        wire:click="selectFile('{{ $file['path'] }}', true)"
-                                        class="group flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-xs transition-colors hover:bg-[#1a1a2e]/50 {{ $selectedFile === $file['path'] && $selectedFileStaged ? 'bg-violet-900/20' : '' }}"
-                                    >
-                                        <span class="w-2 shrink-0 text-teal-400">{{ substr($file['indexStatus'], 0, 1) }}</span>
-                                        <span class="min-w-0 flex-1 truncate text-gray-400">{{ $file['path'] }}</span>
-                                        <button
-                                            wire:click.stop="unstageFile('{{ $file['path'] }}')"
-                                            class="ml-auto rounded p-0.5 opacity-0 text-gray-600 transition-opacity group-hover:opacity-100 hover:text-gray-300 cursor-pointer"
-                                            title="Unstage"
-                                        >
-                                            <svg class="h-3 w-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                                                <path stroke-linecap="round" stroke-linejoin="round" d="M20 12H4"/>
-                                            </svg>
-                                        </button>
-                                    </div>
-                                @empty
-                                    <div class="rounded border border-dashed border-[#1e1e32] px-3 py-4 text-center text-xs italic text-gray-600">
-                                        Nothing staged
-                                    </div>
-                                @endforelse
                             </div>
                         </div>
-                    </div>
 
-                    <div class="border-t border-[#1e1e32] p-3">
-                        <div class="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-gray-500">Commit</div>
-                        <textarea
-                            wire:model="commitMessage"
-                            placeholder="Commit message..."
-                            rows="4"
-                            class="w-full resize-none rounded border border-[#2a2a42] bg-[#11111b] px-3 py-2 text-sm text-gray-200 placeholder:text-gray-600 focus:border-violet-600 focus:outline-none"
-                        ></textarea>
-                        <button
-                            wire:click="commit"
-                            wire:loading.attr="disabled"
-                            @if (count($stagedFiles) === 0) disabled @endif
-                            class="mt-3 w-full rounded border px-3 py-2 text-sm font-medium transition-colors {{ count($stagedFiles) > 0 ? 'border-violet-700/40 bg-violet-600 text-white hover:bg-violet-500 cursor-pointer' : 'border-[#2a2a42] bg-[#141420] text-gray-600 cursor-not-allowed' }}"
-                        >
-                            @if (count($stagedFiles) > 0)
-                                <span wire:loading.remove wire:target="commit">Commit {{ count($stagedFiles) }} file{{ count($stagedFiles) === 1 ? '' : 's' }}</span>
-                                <span wire:loading wire:target="commit">Committing...</span>
-                            @else
-                                <span>Stage changes to commit</span>
-                            @endif
-                        </button>
-                    </div>
+                        <div class="border-t border-[#1e1e32] p-3">
+                            <div class="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-gray-500">Commit</div>
+                            <textarea
+                                wire:model="commitMessage"
+                                placeholder="Commit message..."
+                                rows="4"
+                                class="w-full resize-none rounded border border-[#2a2a42] bg-[#11111b] px-3 py-2 text-sm text-gray-200 placeholder:text-gray-600 focus:border-violet-600 focus:outline-none"
+                            ></textarea>
+                            <button
+                                wire:click="commit"
+                                wire:loading.attr="disabled"
+                                @if (count($stagedFiles) === 0) disabled @endif
+                                class="mt-3 w-full rounded border px-3 py-2 text-sm font-medium transition-colors {{ count($stagedFiles) > 0 ? 'border-violet-700/40 bg-violet-600 text-white hover:bg-violet-500 cursor-pointer' : 'border-[#2a2a42] bg-[#141420] text-gray-600 cursor-not-allowed' }}"
+                            >
+                                @if (count($stagedFiles) > 0)
+                                    <span wire:loading.remove wire:target="commit">Commit {{ count($stagedFiles) }} file{{ count($stagedFiles) === 1 ? '' : 's' }}</span>
+                                    <span wire:loading wire:target="commit">Committing...</span>
+                                @else
+                                    <span>Stage changes to commit</span>
+                                @endif
+                            </button>
+                        </div>
+                    @endif
                 </aside>
             </div>
         @endif

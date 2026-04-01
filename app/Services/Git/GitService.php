@@ -202,6 +202,24 @@ class GitService
     }
 
     /**
+     * Get the diff between the current HEAD and another ref.
+     *
+     * Uses triple-dot syntax so branch selection shows changes introduced on
+     * the selected branch since it diverged from the current HEAD.
+     *
+     * @return list<DiffFile>
+     */
+    public function getRefComparisonDiff(string $ref, string $baseRef = 'HEAD'): array
+    {
+        $this->ensureOpen();
+
+        $result = $this->commandRunner->run(['diff', $baseRef . '...' . $ref], timeout: 60);
+        $result->throw("Failed to get diff for ref {$ref}");
+
+        return $this->diffParser->parse($result->output);
+    }
+
+    /**
      * Show the diff for a single file between working tree and HEAD.
      * For untracked files, returns the file content as an "added" diff.
      *

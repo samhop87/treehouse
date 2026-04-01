@@ -57,11 +57,21 @@ class RepoView extends Component
     /** Diff data for the selected file */
     public array $diffFiles = [];
 
+    /** Which history entity is selected: null, 'commit', or 'branch' */
+    public ?string $selectedHistoryType = null;
+
+    /** Diff payload for the selected commit/branch, used to populate the right panel */
+    public array $selectedHistoryDiffs = [];
+
     /** Currently selected commit hash for detail view */
     public ?string $selectedCommit = null;
 
     /** Metadata for the selected commit (for detail panel) */
     public ?array $selectedCommitData = null;
+
+    /** Currently selected branch for history inspection */
+    public ?string $selectedBranch = null;
+    public ?array $selectedBranchData = null;
 
     /** Repo metadata */
     public string $repoName = '';
@@ -127,18 +137,28 @@ class RepoView extends Component
             $stashes = $git->getStashes();
             $this->stashes = $this->serializeStashes($stashes);
 
-            // Keep the center pane selection in sync after refreshes.
-            if ($this->selectedFile !== null) {
-                $this->loadFileDiff();
-            } elseif ($this->selectedCommit !== null) {
+            // Keep selection state in sync after refreshes.
+            if ($this->selectedHistoryType === 'commit' && $this->selectedCommit !== null) {
                 $this->selectedCommitData = collect($this->commits)
                     ->firstWhere('hash', $this->selectedCommit);
 
                 if ($this->selectedCommitData !== null) {
-                    $this->loadCommitDiff($this->selectedCommit);
+                    $this->loadSelectedCommitHistory($this->selectedCommit);
+                    $this->restoreSelectedHistoryFile();
                 } else {
                     $this->clearSelection();
                 }
+            } elseif ($this->selectedHistoryType === 'branch' && $this->selectedBranch !== null) {
+                $this->selectedBranchData = $this->findBranchByName($this->selectedBranch);
+
+                if ($this->selectedBranchData !== null) {
+                    $this->loadSelectedBranchHistory($this->selectedBranch);
+                    $this->restoreSelectedHistoryFile();
+                } else {
+                    $this->clearSelection();
+                }
+            } elseif ($this->selectedFile !== null) {
+                $this->loadWorkingTreeFileDiff();
             }
 
             $this->syncWorkspaceTabContext();
@@ -181,6 +201,7 @@ class RepoView extends Component
                 'name' => $branch->name,
                 'hash' => $branch->hash,
                 'isCurrent' => $branch->isCurrent,
+                'isRemote' => $branch->isRemote,
                 'upstream' => $branch->upstream,
                 'ahead' => $branch->ahead,
                 'behind' => $branch->behind,
@@ -201,11 +222,15 @@ class RepoView extends Component
      */
     public function selectFile(string $path, bool $staged = false): void
     {
+        $this->selectedHistoryType = null;
+        $this->selectedHistoryDiffs = [];
         $this->selectedFile = $path;
         $this->selectedFileStaged = $staged;
         $this->selectedCommit = null;
         $this->selectedCommitData = null;
-        $this->loadFileDiff();
+        $this->selectedBranch = null;
+        $this->selectedBranchData = null;
+        $this->loadWorkingTreeFileDiff();
     }
 
     /**
@@ -213,7 +238,9 @@ class RepoView extends Component
      */
     public function clearFileSelection(): void
     {
-        $this->clearSelection();
+        $this->selectedFile = null;
+        $this->selectedFileStaged = false;
+        $this->diffFiles = [];
     }
 
     /**
@@ -221,21 +248,25 @@ class RepoView extends Component
      */
     public function clearSelection(): void
     {
-        $this->selectedFile = null;
-        $this->selectedFileStaged = false;
+        $this->clearFileSelection();
+        $this->selectedHistoryType = null;
+        $this->selectedHistoryDiffs = [];
         $this->selectedCommit = null;
         $this->selectedCommitData = null;
-        $this->diffFiles = [];
+        $this->selectedBranch = null;
+        $this->selectedBranchData = null;
     }
 
     /**
-     * Select a commit to view its details.
+     * Select a commit to view its changed files in the right panel.
      */
     public function selectCommit(string $hash): void
     {
+        $this->selectedHistoryType = 'commit';
         $this->selectedCommit = $hash;
-        $this->selectedFile = null;
-        $this->selectedFileStaged = false;
+        $this->selectedBranch = null;
+        $this->selectedBranchData = null;
+        $this->clearFileSelection();
 
         // Find commit data from the loaded commits array
         $this->selectedCommitData = null;
@@ -246,10 +277,95 @@ class RepoView extends Component
             }
         }
 
-        $this->loadCommitDiff($hash);
+        $this->loadSelectedCommitHistory($hash);
     }
 
-    private function loadFileDiff(): void
+    /**
+     * Select a branch to view changed files in the right panel.
+     */
+    public function selectBranch(string $name): void
+    {
+        $branch = $this->findBranchByName($name);
+        if ($branch === null) {
+            return;
+        }
+
+        $this->selectedHistoryType = 'branch';
+        $this->selectedBranch = $name;
+        $this->selectedBranchData = $branch;
+        $this->selectedCommit = null;
+        $this->selectedCommitData = null;
+        $this->clearFileSelection();
+        $this->loadSelectedBranchHistory($name);
+    }
+
+    /**
+     * Select a file from the currently selected commit or branch.
+     */
+    public function selectHistoryFile(string $path): void
+    {
+        if ($this->selectedHistoryType === null) {
+            return;
+        }
+
+        $this->selectedFile = $path;
+        $this->selectedFileStaged = false;
+        $this->diffFiles = array_values(array_filter(
+            $this->selectedHistoryDiffs,
+            fn (array $diff) => $diff['path'] === $path
+        ));
+    }
+
+    /**
+     * Checkout a commit in detached HEAD state.
+     */
+    public function checkoutCommit(string $hash): void
+    {
+        $shortHash = substr($hash, 0, 7);
+
+        $this->runGitAction(
+            fn (GitService $git) => $git->checkout($hash),
+            "Checked out commit {$shortHash}"
+        );
+    }
+
+    /**
+     * Select a branch ref from the center graph.
+     */
+    public function selectGraphRef(string $ref): void
+    {
+        $branchName = $this->normalizeGraphBranchRef($ref);
+        if ($branchName === null) {
+            return;
+        }
+
+        $this->selectBranch($branchName);
+    }
+
+    /**
+     * Checkout a branch ref from the center graph.
+     */
+    public function checkoutGraphRef(string $ref): void
+    {
+        $branchName = $this->normalizeGraphBranchRef($ref);
+        if ($branchName === null) {
+            return;
+        }
+
+        $branch = $this->findBranchByName($branchName);
+        if ($branch === null) {
+            return;
+        }
+
+        if ($branch['isRemote']) {
+            $this->checkoutRemoteBranch($branchName);
+            return;
+        }
+
+        $this->checkoutLocalBranch($branchName);
+    }
+
+    private function loadWorkingTreeFileDiff(): void
     {
         try {
             $git = app(GitService::class);
@@ -262,16 +378,29 @@ class RepoView extends Component
         }
     }
 
-    private function loadCommitDiff(string $hash): void
+    private function loadSelectedCommitHistory(string $hash): void
     {
         try {
             $git = app(GitService::class);
             $git->open($this->path);
 
             $diffs = $git->getCommitDiff($hash);
-            $this->diffFiles = $this->serializeDiffFiles($diffs);
+            $this->selectedHistoryDiffs = $this->serializeDiffFiles($diffs);
         } catch (\RuntimeException $e) {
-            $this->diffFiles = [];
+            $this->selectedHistoryDiffs = [];
+        }
+    }
+
+    private function loadSelectedBranchHistory(string $name): void
+    {
+        try {
+            $git = app(GitService::class);
+            $git->open($this->path);
+
+            $diffs = $git->getRefComparisonDiff($name);
+            $this->selectedHistoryDiffs = $this->serializeDiffFiles($diffs);
+        } catch (\RuntimeException $e) {
+            $this->selectedHistoryDiffs = [];
         }
     }
 
@@ -923,6 +1052,47 @@ class RepoView extends Component
         [, $localBranch] = explode('/', $name, 2);
 
         return $localBranch !== '' ? $localBranch : $name;
+    }
+
+    private function findBranchByName(string $name): ?array
+    {
+        foreach (array_merge($this->localBranches, $this->remoteBranches) as $branch) {
+            if ($branch['name'] === $name) {
+                return $branch;
+            }
+        }
+
+        return null;
+    }
+
+    private function normalizeGraphBranchRef(string $ref): ?string
+    {
+        if (str_starts_with($ref, 'tag:')) {
+            return null;
+        }
+
+        if (str_contains($ref, 'HEAD -> ')) {
+            $ref = trim(substr($ref, strpos($ref, '->') + 2));
+        }
+
+        if ($ref === 'HEAD' || str_ends_with($ref, '/HEAD')) {
+            return null;
+        }
+
+        return $this->findBranchByName($ref) !== null ? $ref : null;
+    }
+
+    private function restoreSelectedHistoryFile(): void
+    {
+        if ($this->selectedFile === null) {
+            $this->diffFiles = [];
+            return;
+        }
+
+        $this->diffFiles = array_values(array_filter(
+            $this->selectedHistoryDiffs,
+            fn (array $diff) => $diff['path'] === $this->selectedFile
+        ));
     }
 
     private function syncWorkspaceTabContext(): void
