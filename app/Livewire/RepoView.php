@@ -8,26 +8,24 @@ use App\DTOs\DiffFile;
 use App\DTOs\RepoState;
 use App\DTOs\StashEntry;
 use App\DTOs\Tag;
-use App\Events\OpenRepoRequested;
 use App\Services\Git\GitService;
-use App\Services\RepoManager;
-use Livewire\Attributes\Layout;
 use Livewire\Attributes\On;
-use Livewire\Attributes\Title;
-use Livewire\Attributes\Url;
+use Livewire\Attributes\Reactive;
 use Livewire\Component;
 use Native\Desktop\Events\ChildProcess\ErrorReceived;
 use Native\Desktop\Events\ChildProcess\ProcessExited;
 use Native\Desktop\Facades\ChildProcess;
 
-#[Layout('components.layouts.app')]
-#[Title('Treehouse')]
 class RepoView extends Component
 {
     // ─── STATE ───────────────────────────────────────────────────────────
 
-    #[Url]
     public string $path = '';
+
+    public string $tabId = '';
+
+    #[Reactive]
+    public bool $isActive = false;
 
     /** Repo status (branch, ahead/behind, files) */
     public ?array $status = null;
@@ -80,12 +78,11 @@ class RepoView extends Component
 
     // ─── LIFECYCLE ───────────────────────────────────────────────────────
 
-    public function mount(): void
+    public function mount(string $path, string $tabId, bool $isActive = false): void
     {
-        if (empty($this->path)) {
-            $this->redirect('/');
-            return;
-        }
+        $this->path = $path;
+        $this->tabId = $tabId;
+        $this->isActive = $isActive;
 
         $this->repoName = basename($this->path);
         $this->loadRepoData();
@@ -130,10 +127,21 @@ class RepoView extends Component
             $stashes = $git->getStashes();
             $this->stashes = $this->serializeStashes($stashes);
 
-            // Load diffs if a file is selected
+            // Keep the center pane selection in sync after refreshes.
             if ($this->selectedFile !== null) {
                 $this->loadFileDiff();
+            } elseif ($this->selectedCommit !== null) {
+                $this->selectedCommitData = collect($this->commits)
+                    ->firstWhere('hash', $this->selectedCommit);
+
+                if ($this->selectedCommitData !== null) {
+                    $this->loadCommitDiff($this->selectedCommit);
+                } else {
+                    $this->clearSelection();
+                }
             }
+
+            $this->syncWorkspaceTabContext();
 
         } catch (\RuntimeException $e) {
             $this->errorMessage = $e->getMessage();
@@ -205,7 +213,18 @@ class RepoView extends Component
      */
     public function clearFileSelection(): void
     {
+        $this->clearSelection();
+    }
+
+    /**
+     * Clear the current file or commit selection.
+     */
+    public function clearSelection(): void
+    {
         $this->selectedFile = null;
+        $this->selectedFileStaged = false;
+        $this->selectedCommit = null;
+        $this->selectedCommitData = null;
         $this->diffFiles = [];
     }
 
@@ -216,6 +235,7 @@ class RepoView extends Component
     {
         $this->selectedCommit = $hash;
         $this->selectedFile = null;
+        $this->selectedFileStaged = false;
 
         // Find commit data from the loaded commits array
         $this->selectedCommitData = null;
@@ -334,7 +354,28 @@ class RepoView extends Component
      */
     public function checkoutBranch(string $name): void
     {
+        $this->checkoutLocalBranch($name);
+    }
+
+    /**
+     * Checkout an existing local branch.
+     */
+    public function checkoutLocalBranch(string $name): void
+    {
         $this->runGitAction(fn (GitService $git) => $git->checkout($name), "Switched to '{$name}'");
+    }
+
+    /**
+     * Checkout an existing remote branch via a local tracking branch.
+     */
+    public function checkoutRemoteBranch(string $name): void
+    {
+        $localBranch = $this->localBranchNameFromRemote($name);
+
+        $this->runGitAction(
+            fn (GitService $git) => $git->checkoutRemoteBranch($name),
+            "Switched to '{$localBranch}'"
+        );
     }
 
     /**
@@ -658,7 +699,7 @@ class RepoView extends Component
             $this->remoteProgress = 'Fetching...';
             ChildProcess::start(
                 cmd: ['git', 'fetch', '--prune'],
-                alias: 'git-remote-op',
+                alias: $this->remoteOperationAlias(),
                 cwd: $this->path,
             );
         } else {
@@ -691,7 +732,7 @@ class RepoView extends Component
             $this->remoteProgress = 'Pulling...';
             ChildProcess::start(
                 cmd: ['git', 'pull'],
-                alias: 'git-remote-op',
+                alias: $this->remoteOperationAlias(),
                 cwd: $this->path,
             );
         } else {
@@ -739,7 +780,7 @@ class RepoView extends Component
 
             ChildProcess::start(
                 cmd: $cmd,
-                alias: 'git-remote-op',
+                alias: $this->remoteOperationAlias(),
                 cwd: $this->path,
             );
         } else {
@@ -762,9 +803,9 @@ class RepoView extends Component
      * Handle ChildProcess exit for remote operations.
      */
     #[On('native:' . ProcessExited::class)]
-    public function onRemoteProcessExited(): void
+    public function onRemoteProcessExited(string $alias, int $code): void
     {
-        if ($this->remoteOperation === null) {
+        if ($alias !== $this->remoteOperationAlias() || $this->remoteOperation === null) {
             return;
         }
 
@@ -794,9 +835,9 @@ class RepoView extends Component
      * Handle stderr progress from ChildProcess (git sends progress to stderr).
      */
     #[On('native:' . ErrorReceived::class)]
-    public function onRemoteProgress($data = null): void
+    public function onRemoteProgress(string $alias, mixed $data = null): void
     {
-        if ($this->remoteOperation === null) {
+        if ($alias !== $this->remoteOperationAlias() || $this->remoteOperation === null) {
             return;
         }
 
@@ -807,41 +848,32 @@ class RepoView extends Component
         }
     }
 
-    // ─── MENU EVENTS ─────────────────────────────────────────────────────
+    // ─── WINDOW EVENTS ───────────────────────────────────────────────────
 
-    #[On('native:' . OpenRepoRequested::class)]
-    public function onMenuOpenRepo(): void
+    public function handleWindowFocus(): void
     {
-        if (! $this->isNativeContext()) {
+        if (! $this->isActive) {
             return;
         }
 
-        $path = \Native\Desktop\Dialog::new()
-            ->title('Open Git Repository')
-            ->folders()
-            ->button('Open')
-            ->open();
-
-        if (! empty($path)) {
-            try {
-                app(RepoManager::class)->open($path);
-                $this->path = $path;
-                $this->repoName = basename($path);
-                $this->loadRepoData();
-            } catch (\RuntimeException $e) {
-                $this->errorMessage = $e->getMessage();
-            }
-        }
+        $this->refresh();
     }
 
-    // ─── NAVIGATION ──────────────────────────────────────────────────────
-
-    /**
-     * Return to landing page.
-     */
-    public function goHome(): void
+    public function handleShortcut(string $action): void
     {
-        $this->redirect('/');
+        if (! $this->isActive) {
+            return;
+        }
+
+        match ($action) {
+            'refresh' => $this->refresh(),
+            'push' => $this->pushRemote(),
+            'fetch' => $this->fetchRemote(),
+            'pull' => $this->pullRemote(),
+            'commit' => $this->commit(),
+            'escape' => $this->closeTransientUi(),
+            default => null,
+        };
     }
 
     // ─── HELPERS ─────────────────────────────────────────────────────────
@@ -866,6 +898,43 @@ class RepoView extends Component
         } catch (\RuntimeException $e) {
             $this->errorMessage = $e->getMessage();
         }
+    }
+
+    private function closeTransientUi(): void
+    {
+        $this->clearSelection();
+        $this->closeCreateBranch();
+        $this->closeCreateTag();
+        $this->closeCreateStash();
+        $this->closeMerge();
+    }
+
+    private function remoteOperationAlias(): string
+    {
+        return 'git-remote-op-' . $this->tabId;
+    }
+
+    private function localBranchNameFromRemote(string $name): string
+    {
+        if (! str_contains($name, '/')) {
+            return $name;
+        }
+
+        [, $localBranch] = explode('/', $name, 2);
+
+        return $localBranch !== '' ? $localBranch : $name;
+    }
+
+    private function syncWorkspaceTabContext(): void
+    {
+        $this->dispatch(
+            'workspace-tab-context-updated',
+            tabId: $this->tabId,
+            repoName: $this->repoName,
+            currentBranch: $this->currentBranch,
+            path: $this->path,
+            isDetached: $this->isDetached,
+        );
     }
 
     private function isNativeContext(): bool

@@ -84,7 +84,7 @@ php artisan native:run
 # Run with Vite dev server (hot reload for CSS/JS)
 npm run dev
 
-# Run tests
+# Run tests (can add --parallel)
 php artisan test
 
 # Run the app in browser (limited -- no NativePHP features)

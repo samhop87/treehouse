@@ -166,7 +166,7 @@ class GitCommandRunner
     {
         return $this->run([
             'branch', '-a',
-            '--format=%(refname:short)|%(objectname:short)|%(HEAD)|%(upstream:short)|%(upstream:track)',
+            '--format=%(refname)|%(refname:short)|%(objectname:short)|%(HEAD)|%(upstream:short)|%(upstream:track)',
         ]);
     }
 

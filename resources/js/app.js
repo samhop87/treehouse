@@ -24,28 +24,29 @@ document.addEventListener('alpine:init', () => {
         },
     }));
 
-    // Resizable panel splitter (vertical)
-    Alpine.data('resizablePanel', () => ({
-        panelHeight: 256, // default matches h-64 (16rem = 256px)
-        minHeight: 120,
-        maxHeight: 600,
+    // Resizable right sidebar splitter
+    Alpine.data('repoLayout', () => ({
+        sidebarWidth: 360,
+        minSidebarWidth: 300,
+        maxSidebarWidth: 520,
         dragging: false,
-        startY: 0,
-        startHeight: 0,
+        startX: 0,
+        startWidth: 0,
 
-        startResize(event) {
+        startSidebarResize(event) {
             this.dragging = true;
-            this.startY = event.clientY;
-            this.startHeight = this.panelHeight;
+            this.startX = event.clientX;
+            this.startWidth = this.sidebarWidth;
 
             const onMouseMove = (e) => {
                 if (!this.dragging) return;
-                const delta = this.startY - e.clientY;
-                const newHeight = Math.min(
-                    this.maxHeight,
-                    Math.max(this.minHeight, this.startHeight + delta)
+                const delta = e.clientX - this.startX;
+                const maxWidth = Math.max(this.minSidebarWidth, Math.min(this.maxSidebarWidth, window.innerWidth - 420));
+                const newWidth = Math.min(
+                    maxWidth,
+                    Math.max(this.minSidebarWidth, this.startWidth - delta)
                 );
-                this.panelHeight = newHeight;
+                this.sidebarWidth = newWidth;
             };
 
             const onMouseUp = () => {
@@ -58,7 +59,7 @@ document.addEventListener('alpine:init', () => {
 
             document.addEventListener('mousemove', onMouseMove);
             document.addEventListener('mouseup', onMouseUp);
-            document.body.style.cursor = 'row-resize';
+            document.body.style.cursor = 'col-resize';
             document.body.style.userSelect = 'none';
         },
     }));

@@ -5,9 +5,10 @@ namespace App\Services\Git\Parsers;
 use App\DTOs\Branch;
 
 /**
- * Parses output of `git branch -a --format='%(refname:short)|%(objectname:short)|%(HEAD)|%(upstream:short)|%(upstream:track)'`.
+ * Parses output of `git branch -a --format='%(refname)|%(refname:short)|%(objectname:short)|%(HEAD)|%(upstream:short)|%(upstream:track)'`.
  *
  * Fields (pipe-delimited):
+ *   %(refname)           - full ref name (e.g., "refs/heads/main", "refs/remotes/origin/main")
  *   %(refname:short)     - branch name (e.g., "main", "origin/main")
  *   %(objectname:short)  - abbreviated commit hash
  *   %(HEAD)              - "*" if current branch, " " otherwise
@@ -49,18 +50,18 @@ class BranchParser
 
     private function parseLine(string $line): ?Branch
     {
-        $parts = explode('|', $line, 5);
+        $parts = explode('|', $line, 6);
 
-        if (count($parts) < 5) {
+        if (count($parts) < 6) {
             return null;
         }
 
-        [$name, $hash, $headMarker, $upstream, $trackInfo] = $parts;
+        [$fullRef, $name, $hash, $headMarker, $upstream, $trackInfo] = $parts;
+        $isRemote = str_starts_with($fullRef, 'refs/remotes/');
 
-        // Skip the bare remote HEAD pointer (e.g., "origin" pointing to "origin/main")
-        // These show up as "origin" with the same hash as "origin/main"
-        // We can identify them because they have no upstream and aren't marked as HEAD
-        $isRemote = str_contains($name, '/');
+        if ($isRemote && str_ends_with($name, '/HEAD')) {
+            return null;
+        }
 
         // Parse ahead/behind from tracking info like "[ahead 2, behind 1]" or "[ahead 3]"
         $ahead = null;

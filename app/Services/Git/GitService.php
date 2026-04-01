@@ -373,6 +373,27 @@ class GitService
     }
 
     /**
+     * Switch to a remote branch by checking out or creating its local tracking branch.
+     */
+    public function checkoutRemoteBranch(string $remoteRef): GitResult
+    {
+        $this->ensureOpen();
+
+        $localBranch = $this->localBranchNameFromRemoteRef($remoteRef);
+        $localExists = collect($this->getBranches())
+            ->contains(fn (Branch $branch) => ! $branch->isRemote && $branch->name === $localBranch);
+
+        if ($localExists) {
+            return $this->checkout($localBranch);
+        }
+
+        $result = $this->commandRunner->runWithTranslation(['checkout', '--track', $remoteRef]);
+        $result->throw("Failed to checkout remote branch '{$remoteRef}'");
+
+        return $result;
+    }
+
+    /**
      * Create and switch to a new branch.
      */
     public function checkoutNewBranch(string $name, ?string $startPoint = null): GitResult
@@ -388,6 +409,17 @@ class GitService
         $result->throw("Failed to create and checkout branch '{$name}'");
 
         return $result;
+    }
+
+    private function localBranchNameFromRemoteRef(string $remoteRef): string
+    {
+        if (! str_contains($remoteRef, '/')) {
+            return $remoteRef;
+        }
+
+        [, $localBranch] = explode('/', $remoteRef, 2);
+
+        return $localBranch !== '' ? $localBranch : $remoteRef;
     }
 
     /**

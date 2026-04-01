@@ -19,7 +19,7 @@ class BranchParserTest extends TestCase
     #[Test]
     public function it_parses_current_local_branch(): void
     {
-        $output = 'master|288ae48|*|origin/master|';
+        $output = 'refs/heads/master|master|288ae48|*|origin/master|';
 
         $branches = $this->parser->parse($output);
 
@@ -37,7 +37,7 @@ class BranchParserTest extends TestCase
     #[Test]
     public function it_parses_remote_branch(): void
     {
-        $output = 'origin/master|288ae48| ||';
+        $output = 'refs/remotes/origin/master|origin/master|288ae48| ||';
 
         $branches = $this->parser->parse($output);
 
@@ -51,7 +51,7 @@ class BranchParserTest extends TestCase
     #[Test]
     public function it_parses_ahead_behind_tracking(): void
     {
-        $output = 'feature|abc1234|*|origin/feature|[ahead 3, behind 1]';
+        $output = 'refs/heads/feature|feature|abc1234|*|origin/feature|[ahead 3, behind 1]';
 
         $branches = $this->parser->parse($output);
 
@@ -63,7 +63,7 @@ class BranchParserTest extends TestCase
     #[Test]
     public function it_parses_ahead_only(): void
     {
-        $output = 'feature|abc1234| |origin/feature|[ahead 5]';
+        $output = 'refs/heads/feature|feature|abc1234| |origin/feature|[ahead 5]';
 
         $branches = $this->parser->parse($output);
 
@@ -75,7 +75,7 @@ class BranchParserTest extends TestCase
     #[Test]
     public function it_parses_behind_only(): void
     {
-        $output = 'feature|abc1234| |origin/feature|[behind 2]';
+        $output = 'refs/heads/feature|feature|abc1234| |origin/feature|[behind 2]';
 
         $branches = $this->parser->parse($output);
 
@@ -88,15 +88,15 @@ class BranchParserTest extends TestCase
     public function it_parses_multiple_branches(): void
     {
         $output = <<<'GIT'
-master|288ae48|*|origin/master|
-origin|288ae48| ||
-origin/master|288ae48| ||
-origin/production|9a31d05| ||
+refs/heads/master|master|288ae48|*|origin/master|
+refs/remotes/origin/HEAD|origin/HEAD|288ae48| ||
+refs/remotes/origin/master|origin/master|288ae48| ||
+refs/remotes/origin/production|origin/production|9a31d05| ||
 GIT;
 
         $branches = $this->parser->parse($output);
 
-        $this->assertCount(4, $branches);
+        $this->assertCount(3, $branches);
 
         // First is local current branch
         $this->assertSame('master', $branches[0]->name);
@@ -104,16 +104,16 @@ GIT;
         $this->assertFalse($branches[0]->isRemote);
 
         // Remote branches
+        $this->assertTrue($branches[1]->isRemote);
+        $this->assertSame('origin/master', $branches[1]->name);
         $this->assertTrue($branches[2]->isRemote);
-        $this->assertSame('origin/master', $branches[2]->name);
-        $this->assertTrue($branches[3]->isRemote);
-        $this->assertSame('origin/production', $branches[3]->name);
+        $this->assertSame('origin/production', $branches[2]->name);
     }
 
     #[Test]
     public function it_parses_branch_without_upstream(): void
     {
-        $output = 'new-feature|def4567| ||';
+        $output = 'refs/heads/new-feature|new-feature|def4567| ||';
 
         $branches = $this->parser->parse($output);
 
@@ -134,9 +134,9 @@ GIT;
     public function it_skips_malformed_lines(): void
     {
         $output = <<<'GIT'
-master|288ae48|*|origin/master|
+refs/heads/master|master|288ae48|*|origin/master|
 broken-line
-feature|def456| |origin/feature|[ahead 1]
+refs/heads/feature|feature|def456| |origin/feature|[ahead 1]
 GIT;
 
         $branches = $this->parser->parse($output);

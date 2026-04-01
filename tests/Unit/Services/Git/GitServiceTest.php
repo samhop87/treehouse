@@ -616,6 +616,111 @@ class GitServiceTest extends TestCase
     }
 
     #[Test]
+    public function checkout_remote_branch_creates_a_tracking_branch_when_no_local_branch_exists(): void
+    {
+        $mockRunner = $this->createMock(GitCommandRunner::class);
+        $mockRunner->method('isValidRepo')->willReturn(true);
+        $mockRunner->method('setRepoPath')->willReturnSelf();
+        $mockRunner->expects($this->once())
+            ->method('branches')
+            ->willReturn(new GitResult(
+                success: true,
+                output: 'refs/remotes/origin/feature-x|origin/feature-x|abc1234| ||',
+                error: '',
+                exitCode: 0,
+                command: 'git branch -a --format=...'
+            ));
+        $mockRunner->expects($this->once())
+            ->method('runWithTranslation')
+            ->with(['checkout', '--track', 'origin/feature-x'])
+            ->willReturn(new GitResult(
+                success: true,
+                output: '',
+                error: '',
+                exitCode: 0,
+                command: 'git checkout --track origin/feature-x'
+            ));
+
+        $git = $this->makeGitServiceWithRunner($mockRunner);
+        $git->open('/fake/repo');
+        $result = $git->checkoutRemoteBranch('origin/feature-x');
+
+        $this->assertTrue($result->success);
+    }
+
+    #[Test]
+    public function checkout_remote_branch_reuses_an_existing_local_branch(): void
+    {
+        $mockRunner = $this->createMock(GitCommandRunner::class);
+        $mockRunner->method('isValidRepo')->willReturn(true);
+        $mockRunner->method('setRepoPath')->willReturnSelf();
+        $mockRunner->expects($this->once())
+            ->method('branches')
+            ->willReturn(new GitResult(
+                success: true,
+                output: <<<'GIT'
+refs/heads/feature/demo|feature/demo|abc1234| |origin/feature/demo|
+refs/remotes/origin/feature/demo|origin/feature/demo|abc1234| ||
+GIT,
+                error: '',
+                exitCode: 0,
+                command: 'git branch -a --format=...'
+            ));
+        $mockRunner->expects($this->once())
+            ->method('runWithTranslation')
+            ->with(['checkout', 'feature/demo'])
+            ->willReturn(new GitResult(
+                success: true,
+                output: '',
+                error: '',
+                exitCode: 0,
+                command: 'git checkout feature/demo'
+            ));
+
+        $git = $this->makeGitServiceWithRunner($mockRunner);
+        $git->open('/fake/repo');
+        $result = $git->checkoutRemoteBranch('origin/feature/demo');
+
+        $this->assertTrue($result->success);
+    }
+
+    #[Test]
+    public function checkout_remote_branch_derives_the_local_name_after_the_remote_prefix(): void
+    {
+        $mockRunner = $this->createMock(GitCommandRunner::class);
+        $mockRunner->method('isValidRepo')->willReturn(true);
+        $mockRunner->method('setRepoPath')->willReturnSelf();
+        $mockRunner->expects($this->once())
+            ->method('branches')
+            ->willReturn(new GitResult(
+                success: true,
+                output: <<<'GIT'
+refs/heads/feature/team/alpha|feature/team/alpha|abc1234| |upstream/feature/team/alpha|
+refs/remotes/upstream/feature/team/alpha|upstream/feature/team/alpha|abc1234| ||
+GIT,
+                error: '',
+                exitCode: 0,
+                command: 'git branch -a --format=...'
+            ));
+        $mockRunner->expects($this->once())
+            ->method('runWithTranslation')
+            ->with(['checkout', 'feature/team/alpha'])
+            ->willReturn(new GitResult(
+                success: true,
+                output: '',
+                error: '',
+                exitCode: 0,
+                command: 'git checkout feature/team/alpha'
+            ));
+
+        $git = $this->makeGitServiceWithRunner($mockRunner);
+        $git->open('/fake/repo');
+        $result = $git->checkoutRemoteBranch('upstream/feature/team/alpha');
+
+        $this->assertTrue($result->success);
+    }
+
+    #[Test]
     public function checkout_new_branch_uses_b_flag(): void
     {
         $mockRunner = $this->createMock(GitCommandRunner::class);
