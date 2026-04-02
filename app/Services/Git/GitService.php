@@ -357,6 +357,22 @@ class GitService
         return $result;
     }
 
+    /**
+     * Revert a commit by creating a new inverse commit.
+     */
+    public function revertCommit(string $commitHash): GitResult
+    {
+        $this->ensureOpen();
+
+        $result = $this->commandRunner->runWithTranslation(
+            ['revert', '--no-edit', $commitHash],
+            timeout: 60
+        );
+        $result->throw("Failed to revert commit {$commitHash}");
+
+        return $result;
+    }
+
     // ─── BRANCH OPERATIONS ──────────────────────────────────────────────
 
     /**
@@ -454,6 +470,57 @@ class GitService
         $result->throw("Failed to delete branch '{$name}'");
 
         return $result;
+    }
+
+    /**
+     * Delete a remote branch.
+     */
+    public function deleteRemoteBranch(string $remoteRef): GitResult
+    {
+        $this->ensureOpen();
+
+        [$remote, $branch] = $this->splitRemoteRef($remoteRef);
+
+        $result = $this->commandRunner->runWithTranslation(
+            ['push', $remote, '--delete', $branch],
+            timeout: 60
+        );
+        $result->throw("Failed to delete remote branch '{$remoteRef}'");
+
+        return $result;
+    }
+
+    /**
+     * Delete the local branch and its paired remote branch when present.
+     */
+    public function deleteBranchAndRemote(string $name, bool $forceLocal = false): GitResult
+    {
+        $this->ensureOpen();
+
+        $branches = $this->getBranches();
+        $matchingRemote = collect($branches)
+            ->first(fn (Branch $branch) => $branch->isRemote && $branch->name === $name);
+        $localName = $matchingRemote !== null ? $this->localBranchNameFromRemoteRef($matchingRemote->name) : $name;
+        $remoteRef = $this->resolveRemoteBranchRef($name, $branches);
+
+        $localExists = collect($branches)
+            ->contains(fn (Branch $branch) => ! $branch->isRemote && $branch->name === $localName);
+
+        $lastResult = null;
+
+        if ($localExists) {
+            $lastResult = $this->deleteBranch($localName, $forceLocal);
+        }
+
+        if ($remoteRef !== null) {
+            $lastResult = $this->deleteRemoteBranch($remoteRef);
+        }
+
+        if ($lastResult === null) {
+            throw new \RuntimeException("Failed to find branch '{$name}'");
+        }
+
+        return $lastResult;
     }
 
     /**
@@ -748,6 +815,47 @@ class GitService
     public function getCommandRunner(): GitCommandRunner
     {
         return $this->commandRunner;
+    }
+
+    /**
+     * @return array{0: string, 1: string}
+     */
+    private function splitRemoteRef(string $remoteRef): array
+    {
+        if (! str_contains($remoteRef, '/')) {
+            return ['origin', $remoteRef];
+        }
+
+        [$remote, $branch] = explode('/', $remoteRef, 2);
+
+        return [$remote, $branch !== '' ? $branch : $remoteRef];
+    }
+
+    /**
+     * @param list<Branch> $branches
+     */
+    private function resolveRemoteBranchRef(string $name, array $branches): ?string
+    {
+        $matchingRemote = collect($branches)
+            ->first(fn (Branch $branch) => $branch->isRemote && $branch->name === $name);
+
+        if ($matchingRemote !== null) {
+            return $matchingRemote->name;
+        }
+
+        $matchingLocal = collect($branches)
+            ->first(fn (Branch $branch) => ! $branch->isRemote && $branch->name === $name);
+
+        if ($matchingLocal?->upstream) {
+            return $matchingLocal->upstream;
+        }
+
+        $localName = str_contains($name, '/') ? $this->localBranchNameFromRemoteRef($name) : $name;
+
+        $pairedRemote = collect($branches)
+            ->first(fn (Branch $branch) => $branch->isRemote && $this->localBranchNameFromRemoteRef($branch->name) === $localName);
+
+        return $pairedRemote?->name;
     }
 
     /**

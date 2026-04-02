@@ -1,6 +1,6 @@
 <div
     class="flex h-full min-h-0 overflow-hidden"
-    x-data="{ sidebarTab: 'branches' }"
+    x-data="repoView()"
     x-init="
         let lastRefresh = Date.now();
         window.addEventListener('focus', () => {
@@ -37,6 +37,7 @@
             $wire.handleShortcut('escape');
         }
     "
+    @click.window="closeContextMenu()"
 >
     <aside class="w-60 shrink-0 border-r border-[#1e1e32] bg-[#06060c] flex flex-col overflow-hidden">
         <div class="border-b border-[#1e1e32] px-3 py-2">
@@ -181,9 +182,13 @@
 
                         <div x-show="branchSection === 'local'" x-collapse class="border-t border-[#1e1e32] p-2">
                             @foreach ($localBranches as $branch)
+                                @php
+                                    $branchContextTarget = $this->contextMenuBranchTarget($branch['name']);
+                                @endphp
                                 <div
                                     wire:click="selectBranch('{{ $branch['name'] }}')"
                                     @if (! $branch['isCurrent']) wire:dblclick="checkoutLocalBranch('{{ $branch['name'] }}')" @endif
+                                    x-on:contextmenu.prevent.stop="openContextMenu($event, @js($branchContextTarget))"
                                     class="group mb-1 rounded-md border px-2 py-1.5 text-xs transition-colors cursor-pointer {{ $selectedHistoryType === 'branch' && $selectedBranch === $branch['name'] ? 'border-violet-600/50 bg-violet-900/30 text-gray-100' : ($branch['isCurrent'] ? 'border-violet-700/30 bg-violet-900/20 text-gray-100 hover:bg-violet-900/25' : 'border-transparent text-gray-400 hover:bg-[#1a1a2e]/50 hover:text-gray-300') }}"
                                     title="{{ $branch['isCurrent'] ? 'Click to inspect this branch' : 'Click to inspect this branch. Double-click to switch branches.' }}"
                                 >
@@ -264,9 +269,13 @@
 
                             <div x-show="branchSection === 'remote'" x-collapse class="border-t border-[#1e1e32] p-2">
                                 @foreach ($remoteBranches as $branch)
+                                    @php
+                                        $branchContextTarget = $this->contextMenuBranchTarget($branch['name']);
+                                    @endphp
                                     <div
                                         wire:click="selectBranch('{{ $branch['name'] }}')"
                                         wire:dblclick="checkoutRemoteBranch('{{ $branch['name'] }}')"
+                                        x-on:contextmenu.prevent.stop="openContextMenu($event, @js($branchContextTarget))"
                                         class="mb-1 flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs transition-colors cursor-pointer {{ $selectedHistoryType === 'branch' && $selectedBranch === $branch['name'] ? 'bg-violet-900/25 text-gray-200' : 'text-gray-500 hover:bg-[#1a1a2e]/50 hover:text-gray-300' }}"
                                         title="Click to inspect this branch. Double-click to checkout a local tracking branch."
                                     >
@@ -699,52 +708,92 @@
                             wire:ignore.self
                         >
                             @if (count($commits) > 0)
+                                <div
+                                    class="sticky top-0 z-20 grid border-b border-[#1e1e32] bg-[#0e0e18] text-[10px] font-medium uppercase tracking-[0.18em] text-gray-500"
+                                    :style="'grid-template-columns: 15rem ' + Math.max(graphWidth, graphColumnWidth) + 'px minmax(0,1fr);'"
+                                >
+                                    <div class="border-r border-[#1e1e32] px-4 py-2">Branch / Tag</div>
+                                    <div class="border-r border-[#1e1e32] px-4 py-2">Graph</div>
+                                    <div class="px-4 py-2">Commit Message</div>
+                                </div>
+
                                 <div class="relative text-xs font-mono">
-                                    <canvas x-ref="graphCanvas" wire:ignore class="absolute top-0 left-0 pointer-events-none"></canvas>
+                                    <div
+                                        class="pointer-events-none absolute inset-y-0"
+                                        :style="'left: 15rem; width: ' + Math.max(graphWidth, graphColumnWidth) + 'px;'"
+                                    >
+                                        <canvas x-ref="graphCanvas" wire:ignore class="absolute top-0 left-0"></canvas>
+                                    </div>
 
                                     @foreach ($commits as $commit)
                                         <div
                                             wire:click="selectCommit('{{ $commit['hash'] }}')"
                                             wire:dblclick="checkoutCommit('{{ $commit['hash'] }}')"
-                                            class="flex h-7 cursor-pointer items-center transition-colors hover:bg-[#1a1a2e]/30 {{ $selectedHistoryType === 'commit' && $selectedCommit === $commit['hash'] ? 'bg-violet-900/20' : '' }}"
+                                            x-on:contextmenu.prevent.stop="openContextMenu($event, { type: 'commit', ref: '{{ $commit['hash'] }}', shortHash: '{{ $commit['shortHash'] }}' })"
+                                            class="grid h-11 cursor-pointer items-stretch border-b border-[#1e1e32]/60 transition-colors hover:bg-[#1a1a2e]/30 {{ $selectedHistoryType === 'commit' && $selectedCommit === $commit['hash'] ? 'bg-violet-900/20' : '' }}"
+                                            :style="'grid-template-columns: 15rem ' + Math.max(graphWidth, graphColumnWidth) + 'px minmax(0,1fr);'"
                                             title="Click to inspect changed files. Double-click to checkout this commit."
                                         >
-                                            <div class="shrink-0" :style="'width:' + graphWidth + 'px'"></div>
+                                            <div class="flex min-w-0 items-center overflow-hidden border-r border-[#1e1e32] px-3 py-2">
+                                                <div class="flex min-w-0 flex-nowrap items-center gap-1.5 overflow-hidden">
+                                                    @foreach ($commit['refs'] as $ref)
+                                                        @php
+                                                            $graphRefIsTag = str_starts_with($ref, 'tag:');
+                                                            $graphRefIsPointer = $ref === 'HEAD' || str_ends_with($ref, '/HEAD');
+                                                            $graphRefLabel = $graphRefIsTag ? trim(str_replace('tag:', '', $ref)) : $ref;
+                                                        @endphp
 
-                                            <div class="flex shrink-0 items-center gap-1 px-1">
-                                                @foreach ($commit['refs'] as $ref)
-                                                    @php
-                                                        $graphRefIsTag = str_starts_with($ref, 'tag:');
-                                                        $graphRefIsPointer = $ref === 'HEAD' || str_ends_with($ref, '/HEAD');
-                                                    @endphp
+                                                        @if ($graphRefIsTag)
+                                                            <span class="shrink-0 whitespace-nowrap rounded border border-teal-800/50 bg-teal-900/40 px-2 py-0.5 text-[10px] font-semibold text-teal-300">{{ $graphRefLabel }}</span>
+                                                        @elseif ($graphRefIsPointer)
+                                                            <span class="shrink-0 whitespace-nowrap rounded border border-cyan-800/50 bg-cyan-900/40 px-2 py-0.5 text-[10px] font-semibold text-cyan-300">{{ $graphRefLabel }}</span>
+                                                        @else
+                                                            @php
+                                                                $graphBranchContextTarget = $this->contextMenuBranchTarget($ref);
+                                                            @endphp
+                                                            <button
+                                                                wire:click.stop="selectGraphRef('{{ $ref }}')"
+                                                                wire:dblclick.stop="checkoutGraphRef('{{ $ref }}')"
+                                                                x-on:contextmenu.prevent.stop="openContextMenu($event, @js($graphBranchContextTarget))"
+                                                                class="shrink-0 whitespace-nowrap rounded border px-2 py-0.5 text-[10px] font-semibold transition-colors cursor-pointer {{ str_contains($ref, 'HEAD') ? 'border-cyan-800/50 bg-cyan-900/40 text-cyan-300 hover:bg-cyan-900/50' : (str_contains($ref, '/') ? 'border-[#2a2a42] bg-[#1a1a2e] text-gray-300 hover:bg-[#202035] hover:text-gray-100' : 'border-violet-800/50 bg-violet-900/40 text-violet-300 hover:bg-violet-900/50') }}"
+                                                                title="Click to inspect this branch. Double-click to check it out."
+                                                            >{{ $graphRefLabel }}</button>
+                                                        @endif
+                                                    @endforeach
+                                                </div>
+                                            </div>
 
-                                                    @if ($graphRefIsTag)
-                                                        <span class="whitespace-nowrap rounded border border-teal-800/50 bg-teal-900/40 px-1.5 py-0.5 text-[10px] text-teal-400">{{ trim(str_replace('tag:', '', $ref)) }}</span>
-                                                    @elseif ($graphRefIsPointer)
-                                                        <span class="whitespace-nowrap rounded border border-cyan-800/50 bg-cyan-900/40 px-1.5 py-0.5 text-[10px] text-cyan-400">{{ $ref }}</span>
-                                                    @else
-                                                        <button
-                                                            wire:click.stop="selectGraphRef('{{ $ref }}')"
-                                                            wire:dblclick.stop="checkoutGraphRef('{{ $ref }}')"
-                                                            class="whitespace-nowrap rounded border px-1.5 py-0.5 text-[10px] transition-colors cursor-pointer {{ str_contains($ref, 'HEAD') ? 'border-cyan-800/50 bg-cyan-900/40 text-cyan-400 hover:bg-cyan-900/50' : (str_contains($ref, '/') ? 'border-[#2a2a42] bg-[#1a1a2e] text-gray-400 hover:bg-[#202035] hover:text-gray-200' : 'border-violet-800/50 bg-violet-900/40 text-violet-400 hover:bg-violet-900/50') }}"
-                                                            title="Click to inspect this branch. Double-click to check it out."
-                                                        >{{ $ref }}</button>
+                                            <div class="relative border-r border-[#1e1e32]">
+                                                <div
+                                                    class="absolute top-1/2 overflow-hidden rounded-full border-2 border-[#0f1220] -translate-y-1/2 {{ $selectedHistoryType === 'commit' && $selectedCommit === $commit['hash'] ? 'shadow-[0_0_0_2px_rgba(168,85,247,0.45)]' : 'shadow-[0_0_0_1px_rgba(45,212,191,0.35)]' }}"
+                                                    :style="avatarStyle('{{ $commit['hash'] }}')"
+                                                    title="{{ $commit['author'] }} • {{ $commit['dateHuman'] }}"
+                                                >
+                                                    <div
+                                                        class="flex h-full w-full items-center justify-center text-[10px] font-semibold text-gray-100"
+                                                        style="background-color: hsl({{ $commit['avatarHue'] }} 45% 24%);"
+                                                    >
+                                                        {{ $commit['avatarInitials'] }}
+                                                    </div>
+                                                    <img
+                                                        src="{{ $commit['avatarUrl'] }}"
+                                                        alt="{{ $commit['author'] }}"
+                                                        class="absolute inset-0 h-full w-full object-cover"
+                                                        loading="lazy"
+                                                        onerror="this.style.display='none'"
+                                                    >
+                                                </div>
+                                            </div>
+
+                                            <div class="flex min-w-0 flex-col justify-center px-3 py-2">
+                                                <div class="truncate text-sm text-gray-200">{{ $commit['message'] }}</div>
+                                                <div class="mt-0.5 flex items-center gap-2 text-[10px] text-gray-600">
+                                                    <span class="font-mono">{{ $commit['shortHash'] }}</span>
+                                                    @if ($commit['isMerge'])
+                                                        <span class="rounded border border-[#2a2a42] px-1.5 py-0.5 uppercase tracking-[0.16em] text-[9px] text-gray-500">Merge</span>
                                                     @endif
-                                                @endforeach
+                                                </div>
                                             </div>
-
-                                            <div class="flex-1 truncate px-1 text-gray-300">{{ $commit['message'] }}</div>
-
-                                            <div class="shrink-0 px-2 text-right text-gray-600">
-                                                <span>{{ $commit['author'] }}</span>
-                                                <span class="ml-2">{{ $commit['dateHuman'] }}</span>
-                                            </div>
-
-                                            <div
-                                                class="w-16 shrink-0 cursor-pointer pr-3 text-right text-gray-700 transition-colors hover:text-gray-400"
-                                                x-on:click.stop="navigator.clipboard.writeText('{{ $commit['hash'] }}'); $dispatch('toast', { message: 'Hash copied', type: 'success' })"
-                                                title="Click to copy full hash"
-                                            >{{ $commit['shortHash'] }}</div>
                                         </div>
                                     @endforeach
                                 </div>
@@ -1022,5 +1071,78 @@
                 </aside>
             </div>
         @endif
+    </div>
+
+    <div
+        x-show="contextMenu.open"
+        x-cloak
+        x-on:click.stop
+        x-on:contextmenu.prevent.stop
+        class="fixed z-50 w-64 overflow-hidden rounded-lg border border-[#2a2a42] bg-[#11111b] shadow-2xl shadow-black/50"
+        :style="'left:' + contextMenu.x + 'px; top:' + contextMenu.y + 'px;'"
+        data-context-menu-panel
+    >
+        <div class="border-b border-[#1e1e32] px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-gray-500">
+            Actions
+        </div>
+
+        <div class="py-1.5">
+            <button
+                x-on:click="openCreateBranchHere()"
+                class="flex w-full items-center justify-between px-3 py-2 text-left text-xs text-gray-300 transition-colors hover:bg-[#1a1a2e] hover:text-gray-100"
+            >
+                <span>Create new branch here</span>
+            </button>
+
+            <button
+                x-show="contextMenu.target?.type === 'commit'"
+                x-on:click="revertSelectedCommit()"
+                class="flex w-full items-center justify-between px-3 py-2 text-left text-xs text-gray-300 transition-colors hover:bg-[#1a1a2e] hover:text-gray-100"
+            >
+                <span>Revert Commit</span>
+            </button>
+
+            <button
+                x-show="contextMenu.target?.type === 'branch'"
+                x-bind:disabled="contextMenu.target?.isCurrent"
+                x-on:click="deleteSelectedBranch()"
+                class="flex w-full items-center justify-between px-3 py-2 text-left text-xs transition-colors"
+                x-bind:class="contextMenu.target?.isCurrent ? 'cursor-not-allowed text-gray-600' : 'text-gray-300 hover:bg-[#1a1a2e] hover:text-red-300'"
+            >
+                <span x-text="`Delete ${contextMenu.target?.displayName ?? 'branch'}`"></span>
+            </button>
+
+            <button
+                x-show="contextMenu.target?.type === 'branch' && contextMenu.target?.hasRemotePair"
+                x-bind:disabled="contextMenu.target?.isCurrent"
+                x-on:click="deleteSelectedBranchAndRemote()"
+                class="flex w-full items-center justify-between px-3 py-2 text-left text-xs transition-colors"
+                x-bind:class="contextMenu.target?.isCurrent ? 'cursor-not-allowed text-gray-600' : 'text-gray-300 hover:bg-[#1a1a2e] hover:text-red-300'"
+            >
+                <span x-text="`Delete ${contextMenu.target?.localName ?? 'branch'} and ${contextMenu.target?.remoteName ?? 'remote'}`"></span>
+            </button>
+
+            <button
+                x-show="contextMenu.target?.type === 'branch'"
+                x-on:click="copySelectedBranchName()"
+                class="flex w-full items-center justify-between px-3 py-2 text-left text-xs text-gray-300 transition-colors hover:bg-[#1a1a2e] hover:text-gray-100"
+            >
+                <span>Copy branch name</span>
+            </button>
+
+            <button
+                x-on:click="openCreateTagHere(false)"
+                class="flex w-full items-center justify-between px-3 py-2 text-left text-xs text-gray-300 transition-colors hover:bg-[#1a1a2e] hover:text-gray-100"
+            >
+                <span>Create tag here</span>
+            </button>
+
+            <button
+                x-on:click="openCreateTagHere(true)"
+                class="flex w-full items-center justify-between px-3 py-2 text-left text-xs text-gray-300 transition-colors hover:bg-[#1a1a2e] hover:text-gray-100"
+            >
+                <span>Create annotated tag here</span>
+            </button>
+        </div>
     </div>
 </div>

@@ -4,6 +4,98 @@ import { computeGraphLayout, drawGraph } from './commit-graph';
 // Register Alpine.js components
 document.addEventListener('alpine:init', () => {
 
+    Alpine.data('repoView', () => ({
+        sidebarTab: 'branches',
+        contextMenu: {
+            open: false,
+            x: 12,
+            y: 12,
+            target: null,
+        },
+
+        openContextMenu(event, target) {
+            const menuWidth = 260;
+            const menuHeight = 280;
+            const x = Math.min(event.clientX, window.innerWidth - menuWidth - 12);
+            const y = Math.min(event.clientY, window.innerHeight - menuHeight - 12);
+
+            this.contextMenu = {
+                open: true,
+                x: Math.max(12, x),
+                y: Math.max(12, y),
+                target,
+            };
+        },
+
+        closeContextMenu() {
+            this.contextMenu = {
+                open: false,
+                x: this.contextMenu.x,
+                y: this.contextMenu.y,
+                target: null,
+            };
+        },
+
+        openCreateBranchHere() {
+            const ref = this.contextMenu.target?.ref;
+            if (!ref) return;
+
+            this.sidebarTab = 'branches';
+            this.$wire.openCreateBranchFromRef(ref);
+            this.closeContextMenu();
+        },
+
+        openCreateTagHere(annotated = false) {
+            const ref = this.contextMenu.target?.ref;
+            if (!ref) return;
+
+            this.sidebarTab = 'tags';
+            this.$wire.openCreateTagFromRef(ref, annotated);
+            this.closeContextMenu();
+        },
+
+        revertSelectedCommit() {
+            const target = this.contextMenu.target;
+            if (!target || target.type !== 'commit') return;
+
+            if (!window.confirm(`Revert commit ${target.shortHash}?`)) return;
+
+            this.$wire.revertCommit(target.ref);
+            this.closeContextMenu();
+        },
+
+        deleteSelectedBranch() {
+            const target = this.contextMenu.target;
+            if (!target || target.type !== 'branch' || target.isCurrent) return;
+
+            if (!window.confirm(`Delete branch '${target.displayName}'?`)) return;
+
+            this.$wire.deleteContextBranch(target.ref);
+            this.closeContextMenu();
+        },
+
+        deleteSelectedBranchAndRemote() {
+            const target = this.contextMenu.target;
+            if (!target || target.type !== 'branch' || target.isCurrent || !target.hasRemotePair) return;
+
+            if (!window.confirm(`Delete '${target.localName}' and '${target.remoteName}'?`)) return;
+
+            this.$wire.deleteBranchAndRemote(target.ref);
+            this.closeContextMenu();
+        },
+
+        copySelectedBranchName() {
+            const target = this.contextMenu.target;
+            if (!target || target.type !== 'branch') return;
+
+            navigator.clipboard.writeText(target.displayName);
+            window.dispatchEvent(new CustomEvent('toast', {
+                detail: { message: 'Branch name copied', type: 'success' },
+            }));
+            this.closeContextMenu();
+        },
+    }));
+
     // Toast notification stack
     Alpine.data('toastStack', () => ({
         toasts: [],
@@ -69,7 +161,13 @@ document.addEventListener('alpine:init', () => {
     // so graph stays in sync after Livewire re-renders (wire:ignore.self freezes x-data attrs)
     Alpine.data('commitGraph', () => ({
         graphWidth: 40,
+        graphColumnWidth: 104,
+        rowHeight: 44,
+        laneWidth: 16,
+        graphPadding: 12,
+        avatarSize: 26,
         nodes: [],
+        nodeMap: {},
         _alive: true,
 
         init() {
@@ -95,26 +193,39 @@ document.addEventListener('alpine:init', () => {
             this.$nextTick(() => this.computeAndDraw());
         },
 
+        avatarStyle(hash) {
+            const node = this.nodeMap[hash];
+            if (!node) return 'opacity: 0;';
+
+            const x = this.graphPadding + (node.lane * this.laneWidth) + (this.laneWidth / 2) - (this.avatarSize / 2);
+            return `left: ${x}px; width: ${this.avatarSize}px; height: ${this.avatarSize}px;`;
+        },
+
         computeAndDraw() {
             const commits = this.$wire.get('commits') || [];
             const selectedHash = this.$wire.get('selectedCommit');
 
             if (commits.length === 0) {
                 this.graphWidth = 40;
+                this.nodeMap = {};
                 return;
             }
 
             this.nodes = computeGraphLayout(commits);
+            this.nodeMap = this.nodes.reduce((carry, node) => {
+                carry[node.hash] = node;
+                return carry;
+            }, {});
 
             const canvas = this.$refs.graphCanvas;
             if (!canvas) return;
 
             const ctx = canvas.getContext('2d');
             const result = drawGraph(ctx, this.nodes, {
-                rowHeight: 28,
-                laneWidth: 16,
+                rowHeight: this.rowHeight,
+                laneWidth: this.laneWidth,
                 nodeRadius: 4,
-                padding: 12,
+                padding: this.graphPadding,
                 selectedHash: selectedHash,
             });
 

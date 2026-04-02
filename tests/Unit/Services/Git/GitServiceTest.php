@@ -778,6 +778,94 @@ GIT,
     }
 
     #[Test]
+    public function revert_commit_uses_git_revert_with_no_edit(): void
+    {
+        $mockRunner = $this->createMock(GitCommandRunner::class);
+        $mockRunner->method('isValidRepo')->willReturn(true);
+        $mockRunner->method('setRepoPath')->willReturnSelf();
+        $mockRunner->expects($this->once())
+            ->method('runWithTranslation')
+            ->with(['revert', '--no-edit', 'abc123456789'], 60)
+            ->willReturn(new GitResult(
+                success: true, output: '', error: '', exitCode: 0, command: 'git revert --no-edit abc123456789'
+            ));
+
+        $git = $this->makeGitServiceWithRunner($mockRunner);
+        $git->open('/fake/repo');
+        $result = $git->revertCommit('abc123456789');
+
+        $this->assertTrue($result->success);
+    }
+
+    #[Test]
+    public function delete_remote_branch_pushes_a_delete_ref(): void
+    {
+        $mockRunner = $this->createMock(GitCommandRunner::class);
+        $mockRunner->method('isValidRepo')->willReturn(true);
+        $mockRunner->method('setRepoPath')->willReturnSelf();
+        $mockRunner->expects($this->once())
+            ->method('runWithTranslation')
+            ->with(['push', 'origin', '--delete', 'feature/demo'], 60)
+            ->willReturn(new GitResult(
+                success: true, output: '', error: '', exitCode: 0, command: 'git push origin --delete feature/demo'
+            ));
+
+        $git = $this->makeGitServiceWithRunner($mockRunner);
+        $git->open('/fake/repo');
+        $result = $git->deleteRemoteBranch('origin/feature/demo');
+
+        $this->assertTrue($result->success);
+    }
+
+    #[Test]
+    public function delete_branch_and_remote_deletes_both_when_present(): void
+    {
+        $mockRunner = $this->createMock(GitCommandRunner::class);
+        $mockRunner->method('isValidRepo')->willReturn(true);
+        $mockRunner->method('setRepoPath')->willReturnSelf();
+        $mockRunner->expects($this->once())
+            ->method('branches')
+            ->willReturn(new GitResult(
+                success: true,
+                output: <<<'GIT'
+refs/heads/feature/demo|feature/demo|abc1234| |origin/feature/demo|
+refs/remotes/origin/feature/demo|origin/feature/demo|abc1234| ||
+GIT,
+                error: '',
+                exitCode: 0,
+                command: 'git branch -a --format=...'
+            ));
+        $mockRunner->expects($this->exactly(2))
+            ->method('runWithTranslation')
+            ->willReturnCallback(function (array $args, int $timeout = 30) {
+                static $call = 0;
+                $call++;
+
+                if ($call === 1) {
+                    $this->assertSame(['branch', '-d', 'feature/demo'], $args);
+                    $this->assertSame(30, $timeout);
+
+                    return new GitResult(
+                        success: true, output: '', error: '', exitCode: 0, command: 'git branch -d feature/demo'
+                    );
+                }
+
+                $this->assertSame(['push', 'origin', '--delete', 'feature/demo'], $args);
+                $this->assertSame(60, $timeout);
+
+                return new GitResult(
+                    success: true, output: '', error: '', exitCode: 0, command: 'git push origin --delete feature/demo'
+                );
+            });
+
+        $git = $this->makeGitServiceWithRunner($mockRunner);
+        $git->open('/fake/repo');
+        $result = $git->deleteBranchAndRemote('feature/demo');
+
+        $this->assertTrue($result->success);
+    }
+
+    #[Test]
     public function merge_returns_result_without_throwing(): void
     {
         $mockRunner = $this->createMock(GitCommandRunner::class);

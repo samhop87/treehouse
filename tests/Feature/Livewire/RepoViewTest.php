@@ -147,6 +147,38 @@ class RepoViewTest extends TestCase
         $this->assertCount(1, $component->get('diffFiles'));
     }
 
+    public function test_open_create_branch_from_ref_prefills_the_start_point(): void
+    {
+        $this->bindGitServiceMock(loadCount: 1);
+
+        Livewire::test(RepoView::class, [
+            'path' => '/fake/repo',
+            'tabId' => 'tab-1',
+            'isActive' => true,
+        ])
+            ->call('openCreateBranchFromRef', 'abc123456789')
+            ->assertSet('showCreateBranch', true)
+            ->assertSet('newBranchName', '')
+            ->assertSet('newBranchStartPoint', 'abc123456789');
+    }
+
+    public function test_open_create_annotated_tag_from_ref_prefills_the_ref(): void
+    {
+        $this->bindGitServiceMock(loadCount: 1);
+
+        Livewire::test(RepoView::class, [
+            'path' => '/fake/repo',
+            'tabId' => 'tab-1',
+            'isActive' => true,
+        ])
+            ->call('openCreateTagFromRef', 'origin/main', true)
+            ->assertSet('showCreateTag', true)
+            ->assertSet('newTagName', '')
+            ->assertSet('newTagRef', 'origin/main')
+            ->assertSet('newTagAnnotated', true)
+            ->assertSet('newTagMessage', '');
+    }
+
     private function bindGitServiceMock(int $loadCount): void
     {
         $state = new RepoState(

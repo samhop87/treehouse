@@ -193,8 +193,8 @@ class RepoView extends Component
 
     private function hydrateBranches(array $branches): void
     {
-        $this->localBranches = [];
-        $this->remoteBranches = [];
+        $localBranches = [];
+        $remoteBranches = [];
 
         foreach ($branches as $branch) {
             $data = [
@@ -202,17 +202,41 @@ class RepoView extends Component
                 'hash' => $branch->hash,
                 'isCurrent' => $branch->isCurrent,
                 'isRemote' => $branch->isRemote,
+                'localName' => $branch->isRemote ? $this->localBranchNameFromRemote($branch->name) : $branch->name,
                 'upstream' => $branch->upstream,
                 'ahead' => $branch->ahead,
                 'behind' => $branch->behind,
             ];
 
             if ($branch->isRemote) {
-                $this->remoteBranches[] = $data;
+                $remoteBranches[] = $data;
             } else {
-                $this->localBranches[] = $data;
+                $localBranches[] = $data;
             }
         }
+
+        $remoteByLocalName = collect($remoteBranches)
+            ->mapWithKeys(fn (array $branch) => [$branch['localName'] => $branch['name']])
+            ->all();
+        $localNames = collect($localBranches)->pluck('name')->all();
+
+        $this->localBranches = array_map(function (array $branch) use ($remoteByLocalName) {
+            $pairedRemote = $branch['upstream'] ?: ($remoteByLocalName[$branch['localName']] ?? null);
+
+            return array_merge($branch, [
+                'pairedRemote' => $pairedRemote,
+                'hasPairedRemote' => $pairedRemote !== null,
+                'hasLocalPair' => true,
+            ]);
+        }, $localBranches);
+
+        $this->remoteBranches = array_map(function (array $branch) use ($localNames) {
+            return array_merge($branch, [
+                'pairedRemote' => $branch['name'],
+                'hasPairedRemote' => true,
+                'hasLocalPair' => in_array($branch['localName'], $localNames, true),
+            ]);
+        }, $remoteBranches);
     }
 
     // ─── FILE SELECTION & DIFF ───────────────────────────────────────────
@@ -326,6 +350,19 @@ class RepoView extends Component
         $this->runGitAction(
             fn (GitService $git) => $git->checkout($hash),
             "Checked out commit {$shortHash}"
+        );
+    }
+
+    /**
+     * Revert a commit by creating a new inverse commit.
+     */
+    public function revertCommit(string $hash): void
+    {
+        $shortHash = substr($hash, 0, 7);
+
+        $this->runGitAction(
+            fn (GitService $git) => $git->revertCommit($hash),
+            "Reverted commit {$shortHash}"
         );
     }
 
@@ -528,6 +565,20 @@ class RepoView extends Component
     }
 
     /**
+     * Open the create branch form with a prefilled start point.
+     */
+    public function openCreateBranchFromRef(string $ref): void
+    {
+        $this->closeCreateTag();
+        $this->closeCreateStash();
+        $this->closeMerge();
+        $this->errorMessage = '';
+        $this->showCreateBranch = true;
+        $this->newBranchName = '';
+        $this->newBranchStartPoint = $ref;
+    }
+
+    /**
      * Create a new branch and switch to it.
      */
     public function createBranch(): void
@@ -555,6 +606,57 @@ class RepoView extends Component
     public function deleteBranch(string $name, bool $force = false): void
     {
         $this->runGitAction(fn (GitService $git) => $git->deleteBranch($name, $force), "Deleted branch '{$name}'");
+    }
+
+    /**
+     * Delete the selected branch target, handling local and remote refs.
+     */
+    public function deleteContextBranch(string $name, bool $force = false): void
+    {
+        $branch = $this->findBranchByName($name);
+
+        if ($branch !== null && $branch['isCurrent']) {
+            $this->errorMessage = 'Cannot delete the currently checked out branch.';
+
+            return;
+        }
+
+        if ($branch !== null && $branch['isRemote']) {
+            $this->runGitAction(
+                fn (GitService $git) => $git->deleteRemoteBranch($name),
+                "Deleted branch '{$name}'"
+            );
+
+            return;
+        }
+
+        $this->deleteBranch($branch['name'] ?? $name, $force);
+    }
+
+    /**
+     * Delete the selected branch and its paired remote branch.
+     */
+    public function deleteBranchAndRemote(string $name, bool $forceLocal = false): void
+    {
+        $branch = $this->findBranchByName($name);
+
+        if ($branch !== null && $branch['isCurrent']) {
+            $this->errorMessage = 'Cannot delete the currently checked out branch.';
+
+            return;
+        }
+
+        $localName = $branch['localName'] ?? $this->localBranchNameFromRemote($name);
+        $remoteName = $branch['pairedRemote'] ?? (str_contains($name, '/') ? $name : null);
+
+        $message = $remoteName !== null
+            ? "Deleted '{$localName}' and '{$remoteName}'"
+            : "Deleted branch '{$localName}'";
+
+        $this->runGitAction(
+            fn (GitService $git) => $git->deleteBranchAndRemote($name, $forceLocal),
+            $message
+        );
     }
 
     /**
@@ -637,6 +739,22 @@ class RepoView extends Component
         $this->newTagName = '';
         $this->newTagRef = '';
         $this->newTagAnnotated = false;
+        $this->newTagMessage = '';
+    }
+
+    /**
+     * Open the create tag form with a prefilled ref.
+     */
+    public function openCreateTagFromRef(string $ref, bool $annotated = false): void
+    {
+        $this->closeCreateBranch();
+        $this->closeCreateStash();
+        $this->closeMerge();
+        $this->errorMessage = '';
+        $this->showCreateTag = true;
+        $this->newTagName = '';
+        $this->newTagRef = $ref;
+        $this->newTagAnnotated = $annotated;
         $this->newTagMessage = '';
     }
 
@@ -1054,6 +1172,28 @@ class RepoView extends Component
         return $localBranch !== '' ? $localBranch : $name;
     }
 
+    public function contextMenuBranchTarget(string $name): array
+    {
+        $branchName = $this->normalizeGraphBranchRef($name) ?? $name;
+        $branch = $this->findBranchByName($branchName);
+
+        $localName = $branch['localName'] ?? $this->localBranchNameFromRemote($branchName);
+        $remoteName = $branch['pairedRemote'] ?? (str_contains($branchName, '/') ? $branchName : null);
+        $isCurrent = (bool) ($branch['isCurrent'] ?? false);
+        $isRemote = (bool) ($branch['isRemote'] ?? str_contains($branchName, '/'));
+
+        return [
+            'type' => 'branch',
+            'ref' => $branchName,
+            'displayName' => $branchName,
+            'localName' => $localName,
+            'remoteName' => $remoteName,
+            'isCurrent' => $isCurrent,
+            'isRemote' => $isRemote,
+            'hasRemotePair' => $remoteName !== null,
+        ];
+    }
+
     private function findBranchByName(string $name): ?array
     {
         foreach (array_merge($this->localBranches, $this->remoteBranches) as $branch) {
@@ -1142,6 +1282,9 @@ class RepoView extends Component
             'message' => $c->message,
             'refs' => $c->refs,
             'isMerge' => $c->isMerge(),
+            'avatarUrl' => $this->avatarUrlForEmail($c->email),
+            'avatarInitials' => $this->initialsForAuthor($c->author),
+            'avatarHue' => $this->avatarHueForEmail($c->email),
         ], $commits);
     }
 
@@ -1206,5 +1349,27 @@ class RepoView extends Component
     public function render()
     {
         return view('livewire.repo-view');
+    }
+
+    private function avatarUrlForEmail(string $email): string
+    {
+        return 'https://www.gravatar.com/avatar/' . md5(strtolower(trim($email))) . '?s=64&d=mp';
+    }
+
+    private function initialsForAuthor(string $author): string
+    {
+        $parts = preg_split('/\s+/', trim($author)) ?: [];
+        $initials = collect($parts)
+            ->filter()
+            ->take(2)
+            ->map(fn (string $part) => mb_strtoupper(mb_substr($part, 0, 1)))
+            ->implode('');
+
+        return $initials !== '' ? $initials : '??';
+    }
+
+    private function avatarHueForEmail(string $email): int
+    {
+        return hexdec(substr(md5(strtolower(trim($email))), 0, 2)) % 360;
     }
 }
