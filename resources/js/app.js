@@ -5,94 +5,28 @@ import { computeGraphLayout, drawGraph } from './commit-graph';
 document.addEventListener('alpine:init', () => {
 
     Alpine.data('repoView', () => ({
-        sidebarTab: 'branches',
-        contextMenu: {
-            open: false,
-            x: 12,
-            y: 12,
-            target: null,
+        referenceFilter: '',
+        referenceSections: {
+            local: false,
+            remote: false,
+            stashes: false,
+            tags: true,
         },
 
-        openContextMenu(event, target) {
-            const menuWidth = 260;
-            const menuHeight = 280;
-            const x = Math.min(event.clientX, window.innerWidth - menuWidth - 12);
-            const y = Math.min(event.clientY, window.innerHeight - menuHeight - 12);
-
-            this.contextMenu = {
-                open: true,
-                x: Math.max(12, x),
-                y: Math.max(12, y),
-                target,
-            };
+        toggleReferenceSection(name) {
+            this.referenceSections[name] = !this.referenceSections[name];
         },
 
-        closeContextMenu() {
-            this.contextMenu = {
-                open: false,
-                x: this.contextMenu.x,
-                y: this.contextMenu.y,
-                target: null,
-            };
+        openReferenceSection(name) {
+            this.referenceSections[name] = true;
         },
 
-        openCreateBranchHere() {
-            const ref = this.contextMenu.target?.ref;
-            if (!ref) return;
+        matchesReference(label) {
+            if (!label) return true;
 
-            this.sidebarTab = 'branches';
-            this.$wire.openCreateBranchFromRef(ref);
-            this.closeContextMenu();
-        },
+            const query = this.referenceFilter.trim().toLowerCase();
 
-        openCreateTagHere(annotated = false) {
-            const ref = this.contextMenu.target?.ref;
-            if (!ref) return;
-
-            this.sidebarTab = 'tags';
-            this.$wire.openCreateTagFromRef(ref, annotated);
-            this.closeContextMenu();
-        },
-
-        revertSelectedCommit() {
-            const target = this.contextMenu.target;
-            if (!target || target.type !== 'commit') return;
-
-            if (!window.confirm(`Revert commit ${target.shortHash}?`)) return;
-
-            this.$wire.revertCommit(target.ref);
-            this.closeContextMenu();
-        },
-
-        deleteSelectedBranch() {
-            const target = this.contextMenu.target;
-            if (!target || target.type !== 'branch' || target.isCurrent) return;
-
-            if (!window.confirm(`Delete branch '${target.displayName}'?`)) return;
-
-            this.$wire.deleteContextBranch(target.ref);
-            this.closeContextMenu();
-        },
-
-        deleteSelectedBranchAndRemote() {
-            const target = this.contextMenu.target;
-            if (!target || target.type !== 'branch' || target.isCurrent || !target.hasRemotePair) return;
-
-            if (!window.confirm(`Delete '${target.localName}' and '${target.remoteName}'?`)) return;
-
-            this.$wire.deleteBranchAndRemote(target.ref);
-            this.closeContextMenu();
-        },
-
-        copySelectedBranchName() {
-            const target = this.contextMenu.target;
-            if (!target || target.type !== 'branch') return;
-
-            navigator.clipboard.writeText(target.displayName);
-            window.dispatchEvent(new CustomEvent('toast', {
-                detail: { message: 'Branch name copied', type: 'success' },
-            }));
-            this.closeContextMenu();
+            return query === '' || label.toLowerCase().includes(query);
         },
     }));
 
@@ -118,9 +52,9 @@ document.addEventListener('alpine:init', () => {
 
     // Resizable right sidebar splitter
     Alpine.data('repoLayout', () => ({
-        sidebarWidth: 360,
-        minSidebarWidth: 300,
-        maxSidebarWidth: 520,
+        sidebarWidth: 510,
+        minSidebarWidth: 360,
+        maxSidebarWidth: 680,
         dragging: false,
         startX: 0,
         startWidth: 0,
@@ -161,11 +95,11 @@ document.addEventListener('alpine:init', () => {
     // so graph stays in sync after Livewire re-renders (wire:ignore.self freezes x-data attrs)
     Alpine.data('commitGraph', () => ({
         graphWidth: 40,
-        graphColumnWidth: 104,
-        rowHeight: 44,
+        graphColumnWidth: 96,
+        rowHeight: 40,
         laneWidth: 16,
-        graphPadding: 12,
-        avatarSize: 26,
+        graphPadding: 10,
+        avatarSize: 24,
         nodes: [],
         nodeMap: {},
         _alive: true,

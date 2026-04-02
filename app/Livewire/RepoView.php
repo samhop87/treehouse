@@ -86,6 +86,12 @@ class RepoView extends Component
     /** Loading states */
     public bool $isLoading = true;
 
+    /** Context menu state */
+    public bool $showContextMenu = false;
+    public int $contextMenuX = 12;
+    public int $contextMenuY = 12;
+    public ?array $contextMenuTarget = null;
+
     // ─── LIFECYCLE ───────────────────────────────────────────────────────
 
     public function mount(string $path, string $tabId, bool $isActive = false): void
@@ -364,6 +370,101 @@ class RepoView extends Component
             fn (GitService $git) => $git->revertCommit($hash),
             "Reverted commit {$shortHash}"
         );
+    }
+
+    public function openCommitContextMenu(string $hash, int $x, int $y): void
+    {
+        $commit = collect($this->commits)->firstWhere('hash', $hash);
+        if ($commit === null) {
+            return;
+        }
+
+        $this->showContextMenu = true;
+        $this->contextMenuX = max(12, $x);
+        $this->contextMenuY = max(12, $y);
+        $this->contextMenuTarget = [
+            'type' => 'commit',
+            'ref' => $commit['hash'],
+            'shortHash' => $commit['shortHash'],
+        ];
+    }
+
+    public function openBranchContextMenu(string $ref, int $x, int $y): void
+    {
+        $target = $this->contextMenuBranchTarget($ref);
+
+        $this->showContextMenu = true;
+        $this->contextMenuX = max(12, $x);
+        $this->contextMenuY = max(12, $y);
+        $this->contextMenuTarget = $target;
+    }
+
+    public function closeContextMenu(): void
+    {
+        $this->showContextMenu = false;
+        $this->contextMenuTarget = null;
+    }
+
+    public function createBranchFromContextMenu(): void
+    {
+        $ref = $this->contextMenuTarget['ref'] ?? null;
+        $this->closeContextMenu();
+
+        if (is_string($ref) && $ref !== '') {
+            $this->openCreateBranchFromRef($ref);
+        }
+    }
+
+    public function createTagFromContextMenu(bool $annotated = false): void
+    {
+        $ref = $this->contextMenuTarget['ref'] ?? null;
+        $this->closeContextMenu();
+
+        if (is_string($ref) && $ref !== '') {
+            $this->openCreateTagFromRef($ref, $annotated);
+        }
+    }
+
+    public function revertContextMenuCommit(): void
+    {
+        if (($this->contextMenuTarget['type'] ?? null) !== 'commit') {
+            return;
+        }
+
+        $hash = $this->contextMenuTarget['ref'] ?? null;
+        $this->closeContextMenu();
+
+        if (is_string($hash) && $hash !== '') {
+            $this->revertCommit($hash);
+        }
+    }
+
+    public function deleteContextMenuBranchAction(): void
+    {
+        if (($this->contextMenuTarget['type'] ?? null) !== 'branch') {
+            return;
+        }
+
+        $name = $this->contextMenuTarget['ref'] ?? null;
+        $this->closeContextMenu();
+
+        if (is_string($name) && $name !== '') {
+            $this->deleteContextBranch($name);
+        }
+    }
+
+    public function deleteContextMenuBranchAndRemoteAction(): void
+    {
+        if (($this->contextMenuTarget['type'] ?? null) !== 'branch') {
+            return;
+        }
+
+        $name = $this->contextMenuTarget['ref'] ?? null;
+        $this->closeContextMenu();
+
+        if (is_string($name) && $name !== '') {
+            $this->deleteBranchAndRemote($name);
+        }
     }
 
     /**
@@ -1149,6 +1250,7 @@ class RepoView extends Component
 
     private function closeTransientUi(): void
     {
+        $this->closeContextMenu();
         $this->clearSelection();
         $this->closeCreateBranch();
         $this->closeCreateTag();
