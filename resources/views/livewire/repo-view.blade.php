@@ -37,6 +37,11 @@
             $wire.handleShortcut('escape');
         }
     "
+    @workspace-repo-action.window="
+        if (! $wire.get('isActive')) return;
+        if (! $event.detail || ! $event.detail.action) return;
+        $wire.handleShortcut($event.detail.action);
+    "
     @mousedown.window="
         if ($wire.get('showContextMenu') && ! $event.target.closest('[data-context-menu-panel]') && ! $event.target.closest('[data-history-context-menu-trigger]')) {
             $wire.closeContextMenu();
@@ -552,86 +557,6 @@
             </div>
         @endif
 
-        <div class="flex items-stretch gap-1 border-b border-[#3a3f4b] bg-[#343943] px-3 py-1.5">
-            <button
-                wire:click="refresh"
-                wire:loading.attr="disabled"
-                class="flex min-w-[4.75rem] flex-col items-center justify-center gap-1 rounded px-2 py-1.5 text-[11px] text-gray-300 transition-colors hover:bg-[#2c3039] hover:text-gray-100 cursor-pointer"
-                title="Refresh (Cmd+R)"
-            >
-                <span wire:loading.remove wire:target="refresh" class="leading-none">Refresh</span>
-                <span wire:loading wire:target="refresh" class="leading-none">Loading</span>
-                <svg class="h-5 w-5" wire:loading.class="animate-spin" wire:target="refresh" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-                </svg>
-            </button>
-
-            <button
-                wire:click="fetchRemote"
-                @if ($remoteOperation) disabled @endif
-                class="flex min-w-[4.75rem] flex-col items-center justify-center gap-1 rounded px-2 py-1.5 text-[11px] text-gray-300 transition-colors hover:bg-[#2c3039] hover:text-gray-100 disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
-                title="Fetch from remote (Cmd+Shift+F)"
-            >
-                <span class="leading-none">{{ $remoteOperation === 'fetch' ? 'Fetching' : 'Fetch' }}</span>
-                <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
-                </svg>
-            </button>
-
-            <button
-                wire:click="pullRemote"
-                @if ($remoteOperation) disabled @endif
-                class="flex min-w-[4.75rem] flex-col items-center justify-center gap-1 rounded px-2 py-1.5 text-[11px] transition-colors disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer {{ $behind > 0 ? 'text-cyan-300 hover:bg-cyan-900/20 hover:text-cyan-200' : 'text-gray-300 hover:bg-[#2c3039] hover:text-gray-100' }}"
-                title="Pull from remote (Cmd+Shift+L)"
-            >
-                <div class="flex items-center gap-1 leading-none">
-                    <span>{{ $remoteOperation === 'pull' ? 'Pulling' : 'Pull' }}</span>
-                    @if ($behind > 0 && $remoteOperation !== 'pull')
-                        <span class="rounded bg-cyan-900/40 px-1 text-[9px] text-cyan-300">{{ $behind }}</span>
-                    @endif
-                </div>
-                <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M19 14l-7 7m0 0l-7-7m7 7V3"/>
-                </svg>
-            </button>
-
-            <button
-                wire:click="pushRemote"
-                @if ($remoteOperation) disabled @endif
-                class="flex min-w-[4.75rem] flex-col items-center justify-center gap-1 rounded px-2 py-1.5 text-[11px] transition-colors disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer {{ $ahead > 0 ? 'text-violet-300 hover:bg-violet-900/20 hover:text-violet-200' : 'text-gray-300 hover:bg-[#2c3039] hover:text-gray-100' }}"
-                title="Push to remote (Cmd+Shift+P)"
-            >
-                <div class="flex items-center gap-1 leading-none">
-                    <span>{{ $remoteOperation === 'push' ? 'Pushing' : 'Push' }}</span>
-                    @if ($ahead > 0 && $remoteOperation !== 'push')
-                        <span class="rounded bg-violet-900/40 px-1 text-[9px] text-violet-300">{{ $ahead }}</span>
-                    @endif
-                </div>
-                <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M5 10l7-7m0 0l7 7m-7-7v18"/>
-                </svg>
-            </button>
-
-            <div class="ml-auto flex min-w-0 items-center gap-3 border-l border-[#444a56] pl-4">
-                @if ($remoteProgress)
-                    <span class="truncate text-[10px] text-gray-500">{{ $remoteProgress }}</span>
-                @endif
-
-                <div class="min-w-0 text-right">
-                    <div class="text-[10px] uppercase tracking-[0.18em] text-gray-500">Status</div>
-                    @if ($isDetached)
-                        <div class="mt-1 truncate text-sm font-medium text-cyan-300">Detached HEAD</div>
-                        <div class="truncate text-[10px] text-gray-600">{{ $status['headHash'] ?? '' }}</div>
-                    @else
-                        <div class="mt-1 truncate text-sm font-medium text-gray-100">{{ $currentBranch }}</div>
-                        <div class="truncate text-[10px] text-gray-600">
-                            {{ $upstream ?: 'No upstream' }}
-                        </div>
-                    @endif
-                </div>
-            </div>
-        </div>
-
         @if ($isLoading)
             <div class="flex flex-1 items-center justify-center">
                 <div class="flex flex-col items-center gap-3">
@@ -775,6 +700,9 @@
                                     </div>
 
                                     @foreach ($commits as $commit)
+                                        @php
+                                            $commitHasRefs = count($commit['refs']) > 0;
+                                        @endphp
                                         <div
                                             wire:click="selectCommit('{{ $commit['hash'] }}')"
                                             wire:dblclick="checkoutCommit('{{ $commit['hash'] }}')"
@@ -784,7 +712,7 @@
                                             :style="'grid-template-columns: 12rem ' + Math.max(graphWidth, graphColumnWidth) + 'px minmax(0,1fr);'"
                                             title="Click to inspect changed files. Double-click to checkout this commit."
                                         >
-                                            <div class="flex min-w-0 items-center overflow-hidden border-r border-[#1e1e32] px-3 py-1.5">
+                                            <div class="flex min-w-0 items-center overflow-hidden border-r border-[#1e1e32] {{ $commitHasRefs ? 'px-3 py-1.5' : 'px-2.5 py-1' }}">
                                                 <div class="flex min-w-0 flex-nowrap items-center gap-1.5 overflow-hidden">
                                                     @foreach ($commit['refs'] as $ref)
                                                         @php
@@ -836,15 +764,15 @@
                                                 </div>
                                             </div>
 
-                                            <div class="flex min-w-0 flex-col justify-center px-3 py-1.5">
+                                            <div class="flex min-w-0 flex-col justify-center {{ $commitHasRefs ? 'px-3 py-1.5' : 'px-2.5 py-1' }}">
                                                 <div class="flex min-w-0 items-center gap-2">
-                                                    <div class="truncate text-[0.95rem] text-gray-200">{{ $commit['message'] }}</div>
+                                                    <div class="truncate {{ $commitHasRefs ? 'text-[0.95rem]' : 'text-[0.82rem]' }} text-gray-200">{{ $commit['message'] }}</div>
                                                     @if ($commit['isMerge'])
-                                                        <span class="rounded border border-[#2a2a42] px-1.5 py-0.5 uppercase tracking-[0.16em] text-[9px] text-gray-500">Merge</span>
+                                                        <span class="rounded border border-[#2a2a42] px-1.5 py-0.5 uppercase tracking-[0.16em] {{ $commitHasRefs ? 'text-[9px]' : 'text-[8px]' }} text-gray-500">Merge</span>
                                                     @endif
-                                                    <span class="ml-auto shrink-0 rounded border border-[#313641] bg-[#1c2028] px-1.5 py-0.5 text-[9px] uppercase tracking-[0.14em] text-gray-500">{{ $commit['dateHuman'] }}</span>
+                                                    <span class="ml-auto shrink-0 rounded border border-[#313641] bg-[#1c2028] px-1.5 py-0.5 uppercase tracking-[0.14em] {{ $commitHasRefs ? 'text-[9px]' : 'text-[8px]' }} text-gray-500">{{ $commit['dateHuman'] }}</span>
                                                 </div>
-                                                <div class="mt-0.5 flex items-center gap-2 text-[10px] text-gray-600">
+                                                <div class="mt-0.5 flex items-center gap-2 {{ $commitHasRefs ? 'text-[10px]' : 'text-[9px]' }} text-gray-600">
                                                     <span class="font-mono">{{ $commit['shortHash'] }}</span>
                                                 </div>
                                             </div>
