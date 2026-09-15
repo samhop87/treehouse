@@ -620,8 +620,13 @@ class RepoView extends Component
             return;
         }
 
-        $branch = $this->findBranchByName($branchName);
+        // The graph can contain refs that are outside the bounded sidebar
+        // snapshot. Resolve those against git before deciding how to check
+        // them out instead of silently treating them as unavailable.
+        $branch = $this->findBranchByName($branchName) ?? $this->findBranchInRepository($branchName);
         if ($branch === null) {
+            $this->errorMessage = "Branch '{$branchName}' was not found.";
+
             return;
         }
 
@@ -666,7 +671,7 @@ class RepoView extends Component
             $git = app(GitService::class);
             $git->open($this->path);
 
-            $diffs = $git->getRefComparisonDiff($name);
+            $diffs = $git->getRefComparisonFiles($name);
             $this->selectedHistoryDiffs = $this->serializeDiffFiles($diffs, includeHunks: false);
         } catch (\RuntimeException $e) {
             $this->selectedHistoryDiffs = [];
@@ -692,12 +697,14 @@ class RepoView extends Component
 
             $diffs = $this->selectedHistoryType === 'commit'
                 ? $git->getCommitDiff((string) $this->selectedCommit)
-                : $git->getRefComparisonDiff((string) $this->selectedBranch);
+                : $git->getRefComparisonFileDiff((string) $this->selectedBranch, $path);
 
-            $diffs = array_values(array_filter(
-                $diffs,
-                fn (DiffFile $diff) => $diff->path === $path,
-            ));
+            if ($this->selectedHistoryType === 'commit') {
+                $diffs = array_values(array_filter(
+                    $diffs,
+                    fn (DiffFile $diff) => $diff->path === $path,
+                ));
+            }
 
             $this->diffFiles = $this->serializeDiffFiles($diffs);
         } catch (\RuntimeException $e) {
@@ -1622,6 +1629,41 @@ class RepoView extends Component
         return null;
     }
 
+    /**
+     * Resolve a branch directly from git when it is outside the bounded
+     * Livewire sidebar snapshot.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function findBranchInRepository(string $name): ?array
+    {
+        try {
+            $git = app(GitService::class);
+            $git->open($this->path);
+
+            foreach ($git->getBranches() as $branch) {
+                if ($branch->name !== $name) {
+                    continue;
+                }
+
+                return [
+                    'name' => $branch->name,
+                    'hash' => $branch->hash,
+                    'isCurrent' => $branch->isCurrent,
+                    'isRemote' => $branch->isRemote,
+                    'localName' => $branch->isRemote ? $this->localBranchNameFromRemote($branch->name) : $branch->name,
+                    'upstream' => $branch->upstream,
+                    'ahead' => $branch->ahead,
+                    'behind' => $branch->behind,
+                ];
+            }
+        } catch (\RuntimeException $e) {
+            $this->errorMessage = $e->getMessage();
+        }
+
+        return null;
+    }
+
     private function normalizeGraphBranchRef(string $ref): ?string
     {
         if (str_starts_with($ref, 'tag:')) {
@@ -1636,7 +1678,7 @@ class RepoView extends Component
             return null;
         }
 
-        return $this->findBranchByName($ref) !== null ? $ref : null;
+        return $ref !== '' ? $ref : null;
     }
 
     private function restoreSelectedHistoryFile(): void

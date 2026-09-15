@@ -277,6 +277,77 @@ class RepoViewTest extends TestCase
         $this->assertStringNotContainsString('wire:dblclick.stop="checkoutGraphRef(', $html);
     }
 
+    public function test_sidebar_branch_rows_defer_single_click_before_checkout(): void
+    {
+        $this->bindSelectableGitServiceMock();
+
+        $html = Livewire::test(RepoView::class, [
+            'path' => '/fake/repo',
+            'tabId' => 'tab-1',
+            'isActive' => true,
+        ])->html();
+
+        $this->assertStringContainsString('handleBranchClick(', $html);
+        $this->assertStringContainsString('handleBranchDoubleClick(', $html);
+        $this->assertStringNotContainsString('wire:dblclick="checkoutLocalBranch(', $html);
+        $this->assertStringNotContainsString('wire:dblclick="checkoutRemoteBranch(', $html);
+    }
+
+    public function test_context_menu_checks_out_a_branch_outside_the_bounded_sidebar_snapshot(): void
+    {
+        $state = new RepoState(
+            headHash: 'abc1234',
+            branch: 'main',
+            upstream: 'origin/main',
+            ahead: 0,
+            behind: 0,
+            isDetached: false,
+            files: [],
+        );
+        $commit = new Commit(
+            hash: 'abc123456789',
+            shortHash: 'abc1234',
+            parents: [],
+            author: 'Test User',
+            email: 'test@example.com',
+            date: CarbonImmutable::parse('2026-04-01T12:00:00Z'),
+            message: 'Initial commit',
+            refs: ['HEAD -> main'],
+        );
+        $branches = [new Branch('main', 'abc1234', true, false, 'origin/main')];
+        foreach (range(1, 500) as $index) {
+            $branches[] = new Branch("feature/{$index}", 'def5678');
+        }
+        $branches[] = new Branch('feature/target', 'def5678');
+
+        $git = Mockery::mock(GitService::class);
+        $git->shouldReceive('open')->with('/fake/repo')->andReturnSelf();
+        $git->shouldReceive('getStatus')->andReturn($state);
+        $git->shouldReceive('getOperationState')->andReturnNull();
+        $git->shouldReceive('getLog')->with(200, true)->andReturn([$commit]);
+        $git->shouldReceive('getBranches')->andReturn($branches);
+        $git->shouldReceive('getTags')->andReturn([]);
+        $git->shouldReceive('getStashes')->andReturn([]);
+        $git->shouldReceive('checkout')->once()->with('feature/target')->andReturn(new GitResult(
+            success: true,
+            output: '',
+            error: '',
+            exitCode: 0,
+            command: 'git checkout feature/target',
+        ));
+        $this->app->instance(GitService::class, $git);
+
+        Livewire::test(RepoView::class, [
+            'path' => '/fake/repo',
+            'tabId' => 'tab-1',
+            'isActive' => true,
+        ])
+            ->call('openBranchContextMenu', 'feature/target', 40, 60)
+            ->call('checkoutContextMenuBranchAction')
+            ->assertSet('errorMessage', '')
+            ->assertDispatched('toast', message: "Switched to 'feature/target'", type: 'success');
+    }
+
     public function test_selecting_a_history_file_populates_the_centre_diff(): void
     {
         $historyDiff = $this->makeDiffFile('README.md');
@@ -537,6 +608,8 @@ class RepoViewTest extends TestCase
         $git->shouldReceive('getStashes')->andReturn([]);
         $git->shouldReceive('getCommitDiff')->with('abc123456789')->andReturn($commitDiffs);
         $git->shouldReceive('getRefComparisonDiff')->with('origin/feature/test')->andReturn($refDiffs);
+        $git->shouldReceive('getRefComparisonFiles')->with('origin/feature/test')->andReturn($refDiffs);
+        $git->shouldReceive('getRefComparisonFileDiff')->with('origin/feature/test', Mockery::type('string'))->andReturn($refDiffs);
         $git->shouldReceive('getFileDiff')->with('resources/js/app.js', false)->andReturn($fileDiffs);
 
         $this->app->instance(GitService::class, $git);

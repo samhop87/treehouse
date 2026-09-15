@@ -223,8 +223,8 @@
                     <div x-show="referenceSections.local" x-collapse class="border-t border-[#343944] bg-[#232730] px-2 py-2">
                         @forelse ($localBranches as $branch)
                             <div
-                                wire:click="selectBranch(@js($branch['name']))"
-                                @if (! $branch['isCurrent']) wire:dblclick="checkoutLocalBranch(@js($branch['name']))" @endif
+                                x-on:click="handleBranchClick(@js($branch['name']))"
+                                @if (! $branch['isCurrent']) x-on:dblclick.stop.prevent="handleBranchDoubleClick(@js($branch['name']), false)" @endif
                                 x-show="matchesReference(@js($branch['name']))"
                                 class="group mb-1 rounded-md border px-2 py-1.5 text-xs transition-colors cursor-pointer {{ $selectedHistoryType === 'branch' && $selectedBranch === $branch['name'] ? 'border-violet-600/40 bg-violet-900/25 text-gray-100' : ($branch['isCurrent'] ? 'border-violet-700/30 bg-violet-900/20 text-gray-100 hover:bg-violet-900/25' : 'border-transparent text-gray-400 hover:bg-[#1a1f27] hover:text-gray-300') }}"
                                 title="{{ $branch['isCurrent'] ? 'Click to inspect this branch' : 'Click to inspect this branch. Double-click to switch branches.' }}"
@@ -320,8 +320,8 @@
                     <div x-show="referenceSections.remote" x-collapse class="border-t border-[#343944] bg-[#232730] px-2 py-2">
                         @forelse ($remoteBranches as $branch)
                             <div
-                                wire:click="selectBranch(@js($branch['name']))"
-                                wire:dblclick="checkoutRemoteBranch(@js($branch['name']))"
+                                x-on:click="handleBranchClick(@js($branch['name']))"
+                                x-on:dblclick.stop.prevent="handleBranchDoubleClick(@js($branch['name']), true)"
                                 x-show="matchesReference(@js($branch['name']))"
                                 class="group mb-1 rounded-md border px-2 py-1.5 text-xs transition-colors cursor-pointer {{ $selectedHistoryType === 'branch' && $selectedBranch === $branch['name'] ? 'border-violet-600/40 bg-violet-900/25 text-gray-200' : 'border-transparent text-gray-500 hover:bg-[#1a1f27] hover:text-gray-300' }}"
                                 title="Click to inspect this branch. Double-click to checkout a local tracking branch."

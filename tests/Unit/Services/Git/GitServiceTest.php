@@ -295,6 +295,60 @@ class GitServiceTest extends TestCase
         }
     }
 
+    #[Test]
+    public function ref_comparison_files_uses_name_status_instead_of_loading_the_patch(): void
+    {
+        $mockRunner = $this->createMock(GitCommandRunner::class);
+        $mockRunner->method('isValidRepo')->willReturn(true);
+        $mockRunner->method('setRepoPath')->willReturnSelf();
+        $mockRunner->expects($this->once())
+            ->method('run')
+            ->with(['diff', '--name-status', '-z', 'HEAD...feature/test'], 60)
+            ->willReturn(new GitResult(
+                success: true,
+                output: "M\0README.md\0A\0new.txt\0R100\0old.txt\0renamed.txt\0",
+                error: '',
+                exitCode: 0,
+                command: 'git diff --name-status -z HEAD...feature/test',
+            ));
+
+        $git = $this->makeGitServiceWithRunner($mockRunner);
+        $git->open('/fake/repo');
+        $diffs = $git->getRefComparisonFiles('feature/test');
+
+        $this->assertCount(3, $diffs);
+        $this->assertSame('modified', $diffs[0]->status);
+        $this->assertSame('added', $diffs[1]->status);
+        $this->assertSame('renamed', $diffs[2]->status);
+        $this->assertSame('old.txt', $diffs[2]->oldPath);
+        $this->assertSame('renamed.txt', $diffs[2]->path);
+    }
+
+    #[Test]
+    public function ref_comparison_file_diff_limits_the_patch_to_the_selected_path(): void
+    {
+        $mockRunner = $this->createMock(GitCommandRunner::class);
+        $mockRunner->method('isValidRepo')->willReturn(true);
+        $mockRunner->method('setRepoPath')->willReturnSelf();
+        $mockRunner->expects($this->once())
+            ->method('run')
+            ->with(['diff', 'HEAD...feature/test', '--', 'README.md'], 60)
+            ->willReturn(new GitResult(
+                success: true,
+                output: "diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-old\n+new\n",
+                error: '',
+                exitCode: 0,
+                command: 'git diff HEAD...feature/test -- README.md',
+            ));
+
+        $git = $this->makeGitServiceWithRunner($mockRunner);
+        $git->open('/fake/repo');
+        $diffs = $git->getRefComparisonFileDiff('feature/test', 'README.md');
+
+        $this->assertCount(1, $diffs);
+        $this->assertSame('README.md', $diffs[0]->path);
+    }
+
     // ─── UTILITY OPERATIONS ─────────────────────────────────────────────
 
     #[Test]

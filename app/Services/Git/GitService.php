@@ -220,6 +220,78 @@ class GitService
     }
 
     /**
+     * Get changed-file metadata for a ref without loading its patch contents.
+     *
+     * Branch inspection uses this bounded form first. The full patch is loaded
+     * only after the user chooses a specific file.
+     *
+     * @return list<DiffFile>
+     */
+    public function getRefComparisonFiles(string $ref, string $baseRef = 'HEAD'): array
+    {
+        $this->ensureOpen();
+
+        $result = $this->commandRunner->run([
+            'diff', '--name-status', '-z', $baseRef.'...'.$ref,
+        ], timeout: 60);
+        $result->throw("Failed to list changed files for ref {$ref}");
+
+        $fields = explode("\0", rtrim($result->output, "\0"));
+        $diffs = [];
+
+        for ($index = 0, $count = count($fields); $index < $count;) {
+            $status = $fields[$index++] ?? '';
+            if ($status === '') {
+                continue;
+            }
+
+            $statusCode = $status[0];
+            $oldPath = null;
+            $path = $fields[$index++] ?? '';
+
+            if ($statusCode === 'R' || $statusCode === 'C') {
+                $oldPath = $path;
+                $path = $fields[$index++] ?? '';
+            }
+
+            if ($path === '') {
+                continue;
+            }
+
+            $diffs[] = new DiffFile(
+                path: $path,
+                status: match ($statusCode) {
+                    'A' => 'added',
+                    'D' => 'deleted',
+                    'R' => 'renamed',
+                    'C' => 'copied',
+                    default => 'modified',
+                },
+                oldPath: $oldPath,
+            );
+        }
+
+        return $diffs;
+    }
+
+    /**
+     * Get the full diff for one file in a ref comparison.
+     *
+     * @return list<DiffFile>
+     */
+    public function getRefComparisonFileDiff(string $ref, string $path, string $baseRef = 'HEAD'): array
+    {
+        $this->ensureOpen();
+
+        $result = $this->commandRunner->run([
+            'diff', $baseRef.'...'.$ref, '--', $path,
+        ], timeout: 60);
+        $result->throw("Failed to get diff for {$path} in ref {$ref}");
+
+        return $this->diffParser->parse($result->output);
+    }
+
+    /**
      * Show the diff for a single file between working tree and HEAD.
      * For untracked files, returns the file content as an "added" diff.
      *

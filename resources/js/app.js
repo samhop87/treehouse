@@ -9,6 +9,7 @@ document.addEventListener('alpine:init', () => {
         targetedCommitHash: null,
         targetHighlightTimer: null,
         graphRefClickTimer: null,
+        branchClickTimer: null,
         referenceSections: {
             local: false,
             remote: false,
@@ -30,6 +31,24 @@ document.addEventListener('alpine:init', () => {
             const query = this.referenceFilter.trim().toLowerCase();
 
             return query === '' || label.toLowerCase().includes(query);
+        },
+
+        handleBranchClick(name) {
+            window.clearTimeout(this.branchClickTimer);
+            this.branchClickTimer = window.setTimeout(() => {
+                this.branchClickTimer = null;
+                this.$wire.selectBranch(name);
+            }, 250);
+        },
+
+        handleBranchDoubleClick(name, isRemote) {
+            window.clearTimeout(this.branchClickTimer);
+            this.branchClickTimer = null;
+            if (isRemote) {
+                this.$wire.checkoutRemoteBranch(name);
+            } else {
+                this.$wire.checkoutLocalBranch(name);
+            }
         },
 
         targetCurrentCommit(hash) {

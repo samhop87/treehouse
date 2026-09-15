@@ -167,14 +167,10 @@ return [
     /**
      * The queue workers that get auto-started on your application start.
      */
-    'queue_workers' => [
-        'default' => [
-            'queues' => ['default'],
-            'memory_limit' => 128,
-            'timeout' => 60,
-            'sleep' => 3,
-        ],
-    ],
+    // Treehouse performs its git work synchronously and does not dispatch
+    // queued jobs. Do not start an idle worker that NativePHP will repeatedly
+    // restart after PHP's zero-second execution-time guard fires.
+    'queue_workers' => [],
 
     /**
      * Define your own scripts to run before and after the build process.
