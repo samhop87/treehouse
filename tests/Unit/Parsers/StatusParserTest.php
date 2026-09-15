@@ -263,4 +263,19 @@ GIT;
         $this->assertSame('', $state->branch);
         $this->assertTrue($state->isClean());
     }
+
+    #[Test]
+    public function it_preserves_paths_in_nul_delimited_status_output(): void
+    {
+        $output = "# branch.oid abc123\0"
+            ."# branch.head main\0"
+            ."? Bob's résumé.txt\0"
+            ."2 R. N... 100644 100644 100644 abc123 def456 R100 new name.txt\0old name.txt\0";
+
+        $state = $this->parser->parse($output);
+
+        $this->assertSame("Bob's résumé.txt", $state->files[0]->path);
+        $this->assertSame('new name.txt', $state->files[1]->path);
+        $this->assertSame('old name.txt', $state->files[1]->origPath);
+    }
 }

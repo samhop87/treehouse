@@ -1102,9 +1102,9 @@ GIT,
         $mockRunner->method('isValidRepo')->willReturn(true);
         $mockRunner->method('setRepoPath')->willReturnSelf();
         $mockRunner->method('runWithTranslation')
-            ->with(['pull', 'origin'], 120)
+            ->with(['pull', '--no-rebase', 'origin'], 120)
             ->willReturn(new GitResult(
-                success: false, output: '', error: 'CONFLICT', exitCode: 1, command: 'git pull origin'
+                success: false, output: '', error: 'CONFLICT', exitCode: 1, command: 'git pull --no-rebase origin'
             ));
 
         $git = $this->makeGitServiceWithRunner($mockRunner);
@@ -1197,19 +1197,7 @@ GIT,
      */
     private function findTestRepo(): ?string
     {
-        $candidates = [
-            '/Users/samhopkinson/webroot/ptp',
-            '/Users/samhopkinson/webroot/counting_cards',
-            '/Users/samhopkinson/webroot/winecx',
-        ];
-
-        foreach ($candidates as $repo) {
-            if (is_dir($repo . '/.git')) {
-                return $repo;
-            }
-        }
-
-        return null;
+        return file_exists(base_path('.git')) ? base_path() : null;
     }
 
     /**

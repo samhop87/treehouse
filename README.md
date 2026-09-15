@@ -5,24 +5,24 @@ A Mac-first desktop Git client
 
 <p align="center">
 <img src="https://img.shields.io/badge/build-passing-brightgreen" alt="Build Status">
-<img src="https://img.shields.io/badge/tests-211%20passed-brightgreen" alt="Tests">
-<img src="https://img.shields.io/badge/version-0.1.0--dev-blue" alt="Latest Stable Version">
+<img src="https://img.shields.io/badge/tests-242%20passed-brightgreen" alt="Tests">
+<img src="https://img.shields.io/badge/version-0.1.0-blue" alt="Version">
 <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
 </p>
 
 ## About
 
-Treehouse is a native macOS desktop Git client built with Laravel 12, NativePHP Desktop v2, Livewire 3, Alpine.js, and Tailwind CSS. It uses the system `git` CLI under the hood and connects to GitHub for authentication and repository management.
+Treehouse is a native macOS desktop Git client built with Laravel 12, NativePHP Desktop v2, Livewire 4, Alpine.js, and Tailwind CSS. It uses the system `git` CLI and can connect to GitHub for repository discovery.
 
 ## Features
 
 - **Visual commit graph** rendered on HTML Canvas with bezier curves and lane-based layout
 - **Full staging workflow** -- stage, unstage, discard, and commit with inline diffs
-- **Branch operations** -- create, checkout, delete, merge with conflict detection
+- **Branch operations** -- create, checkout, delete, merge, rebase, and recover from conflicts
 - **Tag management** -- first-class UI for lightweight and annotated tags (create, delete, push)
 - **Stash operations** -- stash, apply, pop, drop with named stash support
 - **Remote sync** -- fetch, pull, push with async progress via NativePHP ChildProcess
-- **GitHub device flow auth** -- OAuth login without needing a server callback
+- **GitHub device flow auth** -- OAuth login with OS-backed secure token storage
 - **Repo picker** -- clone any of your GitHub repos from a filterable dropdown
 - **Diff viewer** -- unified diff view for staged, unstaged, and commit diffs
 - **Commit detail panel** -- view full commit metadata, parent hashes, and diffs
@@ -37,21 +37,27 @@ Treehouse is a native macOS desktop Git client built with Laravel 12, NativePHP 
 | Layer | Technology |
 |-------|------------|
 | Framework | Laravel 12 |
-| Desktop Runtime | NativePHP Desktop v2 |
-| Frontend | Livewire 3 + Alpine.js |
+| Desktop Runtime | NativePHP Desktop 2.3 |
+| Frontend | Livewire 4 + Alpine.js |
 | Styling | Tailwind CSS 4 |
 | Graph Renderer | HTML Canvas |
 | Git | System `git` CLI via Symfony Process |
 | Auth | GitHub Device Flow OAuth |
 | Database | SQLite (NativePHP managed) |
 
-## Requirements
+## Installed app requirements
 
-- macOS
+- Apple Silicon Mac
+- macOS with Git available (install Apple's Command Line Tools with `xcode-select --install` if needed)
+
+The DMG includes the application runtime. PHP, Composer, Node.js, and a development server are not required on the destination Mac.
+
+## Development requirements
+
 - PHP 8.2+
-- Node.js 18+
-- Git
 - Composer
+- Node.js 22+
+- Git
 
 ## Setup
 
@@ -91,6 +97,14 @@ php artisan test
 php artisan serve
 ```
 
+## Build the Apple Silicon DMG
+
+```bash
+./scripts/build-macos-arm64.sh
+```
+
+The artifact is written to `nativephp/electron/dist/Treehouse-0.1.0-arm64.dmg`. See [docs/RELEASING.md](docs/RELEASING.md) for signing, notarization, verification, and work-Mac installation checks.
+
 ## Architecture
 
 ```
@@ -102,16 +116,13 @@ app/
   Livewire/          # UI components (RepoView, Landing, CloneRepo, GitHubLogin)
   Events/            # NativePHP menu events
   Providers/         # NativeAppServiceProvider (menu, window config)
+nativephp/electron/  # Published and audited Electron runtime used for desktop builds
 resources/
   js/commit-graph.js # Canvas-based commit graph renderer
   views/livewire/    # Blade templates for each component
 ```
 
 The Git layer never uses libgit2 or any Git reimplementation. Every operation runs through `GitCommandRunner`, which executes `git` commands via Symfony Process and pipes output through dedicated parsers that return typed DTOs.
-
-```bash
-php artisan test
-```
 
 ## License
 

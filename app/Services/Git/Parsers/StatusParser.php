@@ -6,7 +6,8 @@ use App\DTOs\FileStatus;
 use App\DTOs\RepoState;
 
 /**
- * Parses output of `git status --porcelain=v2 --branch`.
+ * Parses output of `git status --porcelain=v2 --branch`, including the
+ * NUL-delimited form used by GitCommandRunner.
  *
  * Format reference:
  *   Header lines:  # branch.oid <hash>
@@ -26,7 +27,10 @@ class StatusParser
      */
     public function parse(string $output): RepoState
     {
-        $lines = explode("\n", rtrim($output, "\n"));
+        $nulDelimited = str_contains($output, "\0");
+        $lines = $nulDelimited
+            ? explode("\0", rtrim($output, "\0"))
+            : explode("\n", rtrim($output, "\n"));
 
         $headHash = '';
         $branch = '';
@@ -36,7 +40,8 @@ class StatusParser
         $isDetached = false;
         $files = [];
 
-        foreach ($lines as $line) {
+        for ($index = 0; $index < count($lines); $index++) {
+            $line = $lines[$index];
             if ($line === '') {
                 continue;
             }
@@ -46,7 +51,8 @@ class StatusParser
             } elseif (str_starts_with($line, '1 ')) {
                 $files[] = $this->parseOrdinaryEntry($line);
             } elseif (str_starts_with($line, '2 ')) {
-                $files[] = $this->parseRenamedEntry($line);
+                $origPath = $nulDelimited ? ($lines[++$index] ?? null) : null;
+                $files[] = $this->parseRenamedEntry($line, $origPath);
             } elseif (str_starts_with($line, 'u ')) {
                 $files[] = $this->parseUnmergedEntry($line);
             } elseif (str_starts_with($line, '? ')) {
@@ -114,13 +120,15 @@ class StatusParser
     /**
      * Parse a renamed/copied entry: 2 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <X><score> <path>\t<origPath>
      */
-    private function parseRenamedEntry(string $line): FileStatus
+    private function parseRenamedEntry(string $line, ?string $nulOrigPath = null): FileStatus
     {
         $parts = explode(' ', $line, 10);
 
         $xy = $parts[1];
         $pathPart = $parts[9]; // "newpath\toldpath"
-        $paths = explode("\t", $pathPart, 2);
+        $paths = $nulOrigPath === null
+            ? explode("\t", $pathPart, 2)
+            : [$pathPart, $nulOrigPath];
 
         return new FileStatus(
             path: $paths[0],

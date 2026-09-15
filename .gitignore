@@ -13,6 +13,8 @@
 /.zed
 /auth.json
 /node_modules
+/.pnpm-store
+/nativephp/electron/dist
 /public/build
 /public/hot
 /public/storage

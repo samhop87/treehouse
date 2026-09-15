@@ -41,8 +41,8 @@ class GitCommandRunner
     /**
      * Run a git command and return a GitResult.
      *
-     * @param list<string> $args  Arguments to pass after "git"
-     * @param int          $timeout  Timeout in seconds (default 30)
+     * @param  list<string>  $args  Arguments to pass after "git"
+     * @param  int  $timeout  Timeout in seconds (default 30)
      */
     public function run(array $args, int $timeout = 30): GitResult
     {
@@ -54,7 +54,7 @@ class GitCommandRunner
             return new GitResult(
                 success: false,
                 output: '',
-                error: "fatal: not a git repository (or any of the parent directories): .git",
+                error: 'fatal: not a git repository (or any of the parent directories): .git',
                 exitCode: 128,
                 command: $commandString,
             );
@@ -66,7 +66,17 @@ class GitCommandRunner
             $process = $process->path($this->repoPath);
         }
 
-        $result = $process->run($command);
+        try {
+            $result = $process->run($command);
+        } catch (\Throwable $exception) {
+            return new GitResult(
+                success: false,
+                output: '',
+                error: $exception->getMessage(),
+                exitCode: 127,
+                command: $commandString,
+            );
+        }
 
         return new GitResult(
             success: $result->successful(),
@@ -81,7 +91,7 @@ class GitCommandRunner
      * Run a git command, translating errors to human-readable messages.
      * On failure, the error field contains the translated message.
      *
-     * @param list<string> $args
+     * @param  list<string>  $args
      */
     public function runWithTranslation(array $args, int $timeout = 30): GitResult
     {
@@ -138,14 +148,15 @@ class GitCommandRunner
      */
     public function status(): GitResult
     {
-        return $this->run(['status', '--porcelain=v2', '--branch']);
+        // NUL delimiters preserve spaces, quotes, Unicode and newlines in paths.
+        return $this->run(['status', '--porcelain=v2', '--branch', '-z']);
     }
 
     /**
      * Convenience: run log with our standard format.
      *
-     * @param int $limit  Maximum number of commits
-     * @param list<string> $extraArgs  Additional args (e.g., ['--all'])
+     * @param  int  $limit  Maximum number of commits
+     * @param  list<string>  $extraArgs  Additional args (e.g., ['--all'])
      */
     public function log(int $limit = 200, array $extraArgs = []): GitResult
     {
@@ -192,8 +203,8 @@ class GitCommandRunner
     /**
      * Convenience: get diff (staged or unstaged).
      *
-     * @param bool $staged  If true, show staged changes (--cached)
-     * @param list<string> $paths  Limit to specific paths
+     * @param  bool  $staged  If true, show staged changes (--cached)
+     * @param  list<string>  $paths  Limit to specific paths
      */
     public function diff(bool $staged = false, array $paths = []): GitResult
     {

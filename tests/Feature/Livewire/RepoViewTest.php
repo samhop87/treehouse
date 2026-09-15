@@ -7,12 +7,14 @@ use App\DTOs\Commit;
 use App\DTOs\DiffFile;
 use App\DTOs\DiffHunk;
 use App\DTOs\DiffLine;
+use App\DTOs\GitResult;
 use App\DTOs\RepoState;
 use App\Livewire\RepoView;
 use App\Services\Git\GitService;
 use Carbon\CarbonImmutable;
 use Livewire\Livewire;
 use Mockery;
+use Mockery\MockInterface;
 use Tests\TestCase;
 
 class RepoViewTest extends TestCase
@@ -71,6 +73,45 @@ class RepoViewTest extends TestCase
         $this->assertNull($component->get('selectedFile'));
         $this->assertCount(1, $component->get('selectedHistoryDiffs'));
         $this->assertSame([], $component->get('diffFiles'));
+    }
+
+    public function test_commit_row_renders_a_complete_wire_click_action(): void
+    {
+        $this->bindSelectableGitServiceMock();
+
+        $html = Livewire::test(RepoView::class, [
+            'path' => '/fake/repo',
+            'tabId' => 'tab-1',
+            'isActive' => true,
+        ])->html();
+
+        $this->assertContains(
+            "selectCommit('abc123456789')",
+            $this->wireActionsFrom($html, 'wire:click'),
+        );
+    }
+
+    public function test_create_commit_invokes_git_with_the_entered_message(): void
+    {
+        $git = $this->bindGitServiceMock(loadCount: 2, openCount: 3);
+        $git->shouldReceive('commit')->once()->with('UI commit works')->andReturn(new GitResult(
+            success: true,
+            output: '',
+            error: '',
+            exitCode: 0,
+            command: "git commit -m 'UI commit works'",
+        ));
+
+        Livewire::test(RepoView::class, [
+            'path' => '/fake/repo',
+            'tabId' => 'tab-1',
+            'isActive' => true,
+        ])
+            ->set('commitMessage', 'UI commit works')
+            ->call('createCommit')
+            ->assertSet('errorMessage', '')
+            ->assertSet('commitMessage', '')
+            ->assertDispatched('toast', message: 'Committed: UI commit works', type: 'success');
     }
 
     public function test_selecting_a_branch_populates_history_diffs_without_opening_the_centre_diff(): void
@@ -179,7 +220,23 @@ class RepoViewTest extends TestCase
             ->assertSet('newTagMessage', '');
     }
 
-    private function bindGitServiceMock(int $loadCount): void
+    public function test_failed_native_remote_operation_keeps_the_git_error(): void
+    {
+        $this->bindGitServiceMock(loadCount: 2);
+
+        Livewire::test(RepoView::class, [
+            'path' => '/fake/repo',
+            'tabId' => 'tab-1',
+            'isActive' => true,
+        ])
+            ->set('remoteOperation', 'push')
+            ->set('remoteErrorOutput', 'remote: permission denied')
+            ->call('onRemoteProcessExited', 'git-remote-op-tab-1', 1)
+            ->assertSet('remoteOperation', null)
+            ->assertSet('errorMessage', 'Push failed: remote: permission denied');
+    }
+
+    private function bindGitServiceMock(int $loadCount, ?int $openCount = null): MockInterface
     {
         $state = new RepoState(
             headHash: 'abc1234',
@@ -213,20 +270,23 @@ class RepoViewTest extends TestCase
         );
 
         $git = Mockery::mock(GitService::class);
-        $git->shouldReceive('open')->times($loadCount)->with('/fake/repo')->andReturnSelf();
+        $git->shouldReceive('open')->times($openCount ?? $loadCount)->with('/fake/repo')->andReturnSelf();
         $git->shouldReceive('getStatus')->times($loadCount)->andReturn($state);
+        $git->shouldReceive('getOperationState')->times($loadCount)->andReturnNull();
         $git->shouldReceive('getLog')->times($loadCount)->with(200, true)->andReturn([$commit]);
         $git->shouldReceive('getBranches')->times($loadCount)->andReturn([$branch]);
         $git->shouldReceive('getTags')->times($loadCount)->andReturn([]);
         $git->shouldReceive('getStashes')->times($loadCount)->andReturn([]);
 
         $this->app->instance(GitService::class, $git);
+
+        return $git;
     }
 
     /**
-     * @param list<DiffFile> $commitDiffs
-     * @param list<DiffFile> $refDiffs
-     * @param list<DiffFile> $fileDiffs
+     * @param  list<DiffFile>  $commitDiffs
+     * @param  list<DiffFile>  $refDiffs
+     * @param  list<DiffFile>  $fileDiffs
      */
     private function bindSelectableGitServiceMock(
         array $commitDiffs = [],
@@ -278,6 +338,7 @@ class RepoViewTest extends TestCase
         $git = Mockery::mock(GitService::class);
         $git->shouldReceive('open')->with('/fake/repo')->andReturnSelf();
         $git->shouldReceive('getStatus')->andReturn($state);
+        $git->shouldReceive('getOperationState')->andReturnNull();
         $git->shouldReceive('getLog')->with(200, true)->andReturn([$commit]);
         $git->shouldReceive('getBranches')->andReturn($branches);
         $git->shouldReceive('getTags')->andReturn([]);
@@ -310,5 +371,24 @@ class RepoViewTest extends TestCase
                 ),
             ],
         );
+    }
+
+    /** @return list<string> */
+    private function wireActionsFrom(string $html, string $attribute): array
+    {
+        $document = new \DOMDocument;
+        $previous = libxml_use_internal_errors(true);
+        $document->loadHTML($html);
+        libxml_clear_errors();
+        libxml_use_internal_errors($previous);
+
+        $actions = [];
+        foreach ($document->getElementsByTagName('*') as $element) {
+            if ($element->hasAttribute($attribute)) {
+                $actions[] = $element->getAttribute($attribute);
+            }
+        }
+
+        return $actions;
     }
 }

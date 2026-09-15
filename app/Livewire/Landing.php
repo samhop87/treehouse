@@ -3,6 +3,7 @@
 namespace App\Livewire;
 
 use App\Events\OpenRepoRequested;
+use App\Services\Git\GitCommandRunner;
 use App\Services\GitHub\GitHubAuthService;
 use App\Services\RepoManager;
 use Livewire\Attributes\Layout;
@@ -16,12 +17,25 @@ use Native\Desktop\Dialog;
 class Landing extends Component
 {
     public bool $isGitHubConnected = false;
+
     public ?array $gitHubUser = null;
+
     public array $recentRepos = [];
+
     public string $errorMessage = '';
 
-    public function mount(GitHubAuthService $authService, RepoManager $repoManager): void
-    {
+    public ?string $gitVersion = null;
+
+    public function mount(
+        GitHubAuthService $authService,
+        RepoManager $repoManager,
+        GitCommandRunner $git,
+    ): void {
+        $this->gitVersion = $git->version();
+        if ($this->gitVersion === null) {
+            $this->errorMessage = 'Treehouse requires Git. Install the Apple Command Line Tools, then reopen the app.';
+        }
+
         $this->isGitHubConnected = $authService->hasToken();
         if ($this->isGitHubConnected) {
             $this->gitHubUser = $authService->getUser();
@@ -37,8 +51,15 @@ class Landing extends Component
     {
         $this->errorMessage = '';
 
+        if ($this->gitVersion === null) {
+            $this->errorMessage = 'Treehouse requires Git. Install the Apple Command Line Tools, then reopen the app.';
+
+            return;
+        }
+
         if (! $this->isNativeContext()) {
             $this->errorMessage = 'Folder picker is only available in the desktop app.';
+
             return;
         }
 
@@ -66,7 +87,7 @@ class Landing extends Component
         try {
             $recentRepo = $repoManager->open($path);
             // Navigate to the repo view (placeholder for now — will be implemented in Phase 3)
-            $this->redirect("/repo?path=" . urlencode($path));
+            $this->redirect('/repo?path='.urlencode($path));
         } catch (\RuntimeException $e) {
             $this->errorMessage = $e->getMessage();
         }
@@ -84,7 +105,7 @@ class Landing extends Component
     /**
      * Handle menu event: Open Repository (Cmd+O).
      */
-    #[On('native:' . OpenRepoRequested::class)]
+    #[On('native:'.OpenRepoRequested::class)]
     public function onMenuOpenRepo(): void
     {
         $this->openRepo(app(RepoManager::class));

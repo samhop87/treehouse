@@ -7,6 +7,7 @@ use App\Services\GitHub\GitHubAuthService;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Http;
 use Native\Desktop\Facades\Settings;
+use Native\Desktop\Facades\System;
 use Tests\TestCase;
 
 class GitHubAuthServiceTest extends TestCase
@@ -26,7 +27,9 @@ class GitHubAuthServiceTest extends TestCase
             'nativephp-internal.running' => true,
         ]);
 
-        $this->service = new GitHubAuthService();
+        System::shouldReceive('canEncrypt')->andReturn(false)->byDefault();
+
+        $this->service = new GitHubAuthService;
     }
 
     public function test_is_configured_returns_true_when_client_id_set(): void
@@ -37,7 +40,16 @@ class GitHubAuthServiceTest extends TestCase
     public function test_is_configured_returns_false_when_client_id_empty(): void
     {
         config(['services.github.client_id' => '']);
-        $service = new GitHubAuthService();
+        $service = new GitHubAuthService;
+
+        $this->assertFalse($service->isConfigured());
+    }
+
+    public function test_missing_client_id_is_treated_as_unconfigured(): void
+    {
+        config()->offsetUnset('services.github.client_id');
+
+        $service = new GitHubAuthService;
 
         $this->assertFalse($service->isConfigured());
     }
@@ -67,7 +79,7 @@ class GitHubAuthServiceTest extends TestCase
     public function test_request_device_code_throws_when_not_configured(): void
     {
         config(['services.github.client_id' => '']);
-        $service = new GitHubAuthService();
+        $service = new GitHubAuthService;
 
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessage('GitHub Client ID is not configured');
@@ -212,6 +224,33 @@ class GitHubAuthServiceTest extends TestCase
         Settings::shouldReceive('get')
             ->with('github_token')
             ->andReturn($encrypted);
+
+        $this->assertEquals('gho_test_token', $this->service->getToken());
+    }
+
+    public function test_store_token_uses_native_safe_storage_when_available(): void
+    {
+        System::shouldReceive('canEncrypt')->once()->andReturnTrue();
+        System::shouldReceive('encrypt')
+            ->with('gho_test_token')
+            ->once()
+            ->andReturn('keychain-ciphertext');
+        Settings::shouldReceive('set')
+            ->with('github_token', 'safe-storage:keychain-ciphertext')
+            ->once();
+
+        $this->service->storeToken('gho_test_token');
+    }
+
+    public function test_get_token_decrypts_native_safe_storage_token(): void
+    {
+        Settings::shouldReceive('get')
+            ->with('github_token')
+            ->andReturn('safe-storage:keychain-ciphertext');
+        System::shouldReceive('decrypt')
+            ->with('keychain-ciphertext')
+            ->once()
+            ->andReturn('gho_test_token');
 
         $this->assertEquals('gho_test_token', $this->service->getToken());
     }

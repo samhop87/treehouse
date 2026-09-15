@@ -13,7 +13,7 @@
                         class="group flex shrink-0 items-center gap-0.5 rounded-t-md border-b-2 px-1 py-0 transition-colors {{ $activeTabId === $tab['id'] ? 'border-[#8e94a3] bg-[#3b404a] text-gray-100' : 'border-transparent text-gray-500 hover:bg-[#383d47] hover:text-gray-300' }}"
                     >
                         <button
-                            wire:click="activateTab('{{ $tab['id'] }}')"
+                            wire:click="activateTab(@js($tab['id']))"
                             class="flex min-w-[7.25rem] max-w-[10.5rem] items-center gap-1.5 px-1.5 py-0.5 text-left cursor-pointer"
                             title="{{ $tab['path'] }}"
                         >
@@ -24,7 +24,7 @@
                         </button>
 
                         <button
-                            wire:click="closeTab('{{ $tab['id'] }}')"
+                            wire:click="closeTab(@js($tab['id']))"
                             class="rounded p-0.5 text-gray-600 transition-colors hover:bg-[#2c3039] hover:text-gray-300 cursor-pointer"
                             title="Close tab"
                         >
@@ -120,12 +120,13 @@
                         <span>Push</span>
                     </button>
 
-                    <button
-                        wire:click="openRepo"
+                    <a
+                        href="/"
+                        wire:navigate
                         class="ml-2 rounded-md border border-[#4a4f5f] bg-[#2c3038] px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.14em] text-gray-300 transition-colors hover:bg-[#373c47] hover:text-gray-100 cursor-pointer"
                     >
-                        Open Repository
-                    </button>
+                        Repository menu
+                    </a>
                 </div>
             </div>
         </div>

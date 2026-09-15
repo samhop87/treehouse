@@ -219,18 +219,20 @@ class CloneRepo extends Component
      * Handle clone process exit (from ChildProcess event).
      */
     #[On('native:' . ProcessExited::class)]
-    public function onProcessExited(): void
+    public function onProcessExited(string $alias, int $code): void
     {
-        if ($this->state !== 'cloning') {
+        if ($alias !== 'git-clone' || $this->state !== 'cloning') {
             return;
         }
 
-        // Check if the clone destination was created successfully
-        if (is_dir($this->destinationPath . '/.git')) {
+        if ($code === 0 && is_dir($this->destinationPath . '/.git')) {
             $this->handleCloneSuccess();
         } else {
             $this->state = 'error';
-            $this->errorMessage = 'Clone process exited but repository was not created.';
+            $details = trim($this->cloneProgress);
+            $this->errorMessage = $details !== ''
+                ? 'Clone failed: '.$details
+                : "Clone failed with exit code {$code}.";
         }
     }
 
@@ -238,9 +240,9 @@ class CloneRepo extends Component
      * Handle stderr output from clone (progress info).
      */
     #[On('native:' . ErrorReceived::class)]
-    public function onCloneProgress($data = null): void
+    public function onCloneProgress(string $alias, mixed $data = null): void
     {
-        if ($this->state !== 'cloning') {
+        if ($alias !== 'git-clone' || $this->state !== 'cloning') {
             return;
         }
 

@@ -5,7 +5,6 @@ namespace Tests\Unit\Services\Git;
 use App\DTOs\GitResult;
 use App\Services\Git\GitCommandRunner;
 use App\Services\Git\GitErrorTranslator;
-use Illuminate\Process\PendingProcess;
 use Illuminate\Support\Facades\Process;
 use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
@@ -54,7 +53,7 @@ class GitCommandRunnerTest extends TestCase
     #[Test]
     public function it_returns_failure_for_nonexistent_path(): void
     {
-        $this->runner->setRepoPath('/tmp/definitely-not-a-real-path-' . uniqid());
+        $this->runner->setRepoPath('/tmp/definitely-not-a-real-path-'.uniqid());
 
         $result = $this->runner->run(['status']);
 
@@ -63,28 +62,28 @@ class GitCommandRunnerTest extends TestCase
     }
 
     #[Test]
+    public function it_returns_a_failure_when_git_cannot_be_started(): void
+    {
+        Process::fake(fn () => throw new \RuntimeException('git executable not found'));
+
+        $result = $this->runner->run(['--version']);
+
+        $this->assertFalse($result->success);
+        $this->assertSame(127, $result->exitCode);
+        $this->assertSame('git executable not found', $result->error);
+        $this->assertNull($this->runner->version());
+    }
+
+    #[Test]
     public function it_detects_valid_git_repo(): void
     {
-        // Use one of the test repos on this machine
-        $testRepos = [
-            '/Users/samhopkinson/webroot/ptp',
-            '/Users/samhopkinson/webroot/counting_cards',
-            '/Users/samhopkinson/webroot/winecx',
-        ];
-
-        $repoFound = false;
-        foreach ($testRepos as $repo) {
-            if (is_dir($repo . '/.git')) {
-                $this->runner->setRepoPath($repo);
-                $this->assertTrue($this->runner->isValidRepo());
-                $repoFound = true;
-                break;
-            }
-        }
-
-        if (! $repoFound) {
+        $repo = $this->findTestRepo();
+        if ($repo === null) {
             $this->markTestSkipped('No test git repository available.');
         }
+
+        $this->runner->setRepoPath($repo);
+        $this->assertTrue($this->runner->isValidRepo());
     }
 
     #[Test]
@@ -114,7 +113,7 @@ class GitCommandRunnerTest extends TestCase
     #[Test]
     public function it_translates_errors_for_nonexistent_path(): void
     {
-        $this->runner->setRepoPath('/tmp/definitely-not-a-real-path-' . uniqid());
+        $this->runner->setRepoPath('/tmp/definitely-not-a-real-path-'.uniqid());
 
         $result = $this->runner->runWithTranslation(['status']);
 
@@ -278,19 +277,7 @@ class GitCommandRunnerTest extends TestCase
      */
     private function findTestRepo(): ?string
     {
-        $candidates = [
-            '/Users/samhopkinson/webroot/ptp',
-            '/Users/samhopkinson/webroot/counting_cards',
-            '/Users/samhopkinson/webroot/winecx',
-        ];
-
-        foreach ($candidates as $repo) {
-            if (is_dir($repo . '/.git')) {
-                return $repo;
-            }
-        }
-
-        return null;
+        return file_exists(base_path('.git')) ? base_path() : null;
     }
 
     /**

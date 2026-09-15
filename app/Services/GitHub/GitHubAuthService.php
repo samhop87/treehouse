@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Native\Desktop\Facades\Settings;
+use Native\Desktop\Facades\System;
 
 /**
  * Handles GitHub Device Flow OAuth authentication.
@@ -21,21 +22,30 @@ use Native\Desktop\Facades\Settings;
 class GitHubAuthService
 {
     private const SETTINGS_TOKEN_KEY = 'github_token';
+
     private const SETTINGS_USER_KEY = 'github_user';
 
+    private const SAFE_STORAGE_PREFIX = 'safe-storage:';
+
+    private const LARAVEL_STORAGE_PREFIX = 'laravel:';
+
     private string $clientId;
+
     private string $deviceCodeUrl;
+
     private string $accessTokenUrl;
+
     private string $apiBaseUrl;
+
     private string $scopes;
 
     public function __construct()
     {
-        $this->clientId = config('services.github.client_id', '');
-        $this->deviceCodeUrl = config('services.github.device_code_url');
-        $this->accessTokenUrl = config('services.github.access_token_url');
-        $this->apiBaseUrl = config('services.github.api_base_url');
-        $this->scopes = config('services.github.scopes');
+        $this->clientId = (string) config('services.github.client_id', '');
+        $this->deviceCodeUrl = (string) config('services.github.device_code_url', 'https://github.com/login/device/code');
+        $this->accessTokenUrl = (string) config('services.github.access_token_url', 'https://github.com/login/oauth/access_token');
+        $this->apiBaseUrl = (string) config('services.github.api_base_url', 'https://api.github.com');
+        $this->scopes = (string) config('services.github.scopes', 'repo');
     }
 
     /**
@@ -105,6 +115,7 @@ class GitHubAuthService
 
         if ($response->failed()) {
             Log::warning('[GitHubAuth] Token poll HTTP request failed', ['status' => $response->status()]);
+
             return ['status' => 'error', 'message' => 'HTTP request to GitHub failed.'];
         }
 
@@ -135,12 +146,16 @@ class GitHubAuthService
         };
     }
 
-    /**
-     * Store the access token encrypted in NativePHP Settings.
-     */
+    /** Store the access token using OS-backed encryption when available. */
     public function storeToken(string $token): void
     {
-        $this->settingsSet(self::SETTINGS_TOKEN_KEY, Crypt::encryptString($token));
+        $encrypted = $this->encryptWithNativeSafeStorage($token);
+
+        if ($encrypted === null) {
+            $encrypted = self::LARAVEL_STORAGE_PREFIX.Crypt::encryptString($token);
+        }
+
+        $this->settingsSet(self::SETTINGS_TOKEN_KEY, $encrypted);
     }
 
     /**
@@ -156,10 +171,25 @@ class GitHubAuthService
         }
 
         try {
-            return Crypt::decryptString($encrypted);
-        } catch (\Illuminate\Contracts\Encryption\DecryptException $e) {
+            if (str_starts_with($encrypted, self::SAFE_STORAGE_PREFIX)) {
+                $token = System::decrypt(substr($encrypted, strlen(self::SAFE_STORAGE_PREFIX)));
+
+                if (! is_string($token) || $token === '') {
+                    throw new \RuntimeException('Native secure storage returned an empty token.');
+                }
+
+                return $token;
+            }
+
+            $payload = str_starts_with($encrypted, self::LARAVEL_STORAGE_PREFIX)
+                ? substr($encrypted, strlen(self::LARAVEL_STORAGE_PREFIX))
+                : $encrypted;
+
+            return Crypt::decryptString($payload);
+        } catch (\Throwable $e) {
             Log::warning('Failed to decrypt GitHub token, clearing stored value.');
             $this->clearToken();
+
             return null;
         }
     }
@@ -285,6 +315,7 @@ class GitHubAuthService
             return Settings::get($key);
         } catch (\Exception $e) {
             Log::debug("Settings unavailable: {$e->getMessage()}");
+
             return null;
         }
     }
@@ -302,6 +333,29 @@ class GitHubAuthService
             Settings::set($key, $value);
         } catch (\Exception $e) {
             Log::debug("Settings unavailable: {$e->getMessage()}");
+        }
+    }
+
+    private function encryptWithNativeSafeStorage(string $token): ?string
+    {
+        if (! $this->isNativeContext()) {
+            return null;
+        }
+
+        try {
+            if (! System::canEncrypt()) {
+                return null;
+            }
+
+            $encrypted = System::encrypt($token);
+
+            return is_string($encrypted) && $encrypted !== ''
+                ? self::SAFE_STORAGE_PREFIX.$encrypted
+                : null;
+        } catch (\Throwable $e) {
+            Log::warning('Native secure storage is unavailable; using application encryption.');
+
+            return null;
         }
     }
 }

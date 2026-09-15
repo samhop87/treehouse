@@ -1,19 +1,21 @@
 <?php
 
+use App\Providers\NativeAppServiceProvider;
+
 return [
     /**
      * The version of your app.
      * It is used to determine if the app needs to be updated.
      * Increment this value every time you release a new version of your app.
      */
-    'version' => env('NATIVEPHP_APP_VERSION', '1.0.0'),
+    'version' => env('NATIVEPHP_APP_VERSION', '0.1.0'),
 
     /**
      * The ID of your application. This should be a unique identifier
      * usually in the form of a reverse domain name.
      * For example: com.nativephp.app
      */
-    'app_id' => env('NATIVEPHP_APP_ID', 'com.treehouse.app'),
+    'app_id' => env('NATIVEPHP_APP_ID', 'com.samhopkinson.treehouse'),
 
     /**
      * If your application allows deep linking, you can specify the scheme
@@ -29,7 +31,7 @@ return [
     /**
      * The author of your application.
      */
-    'author' => env('NATIVEPHP_APP_AUTHOR'),
+    'author' => env('NATIVEPHP_APP_AUTHOR', 'Sam Hopkinson'),
 
     /**
      * The copyright notice for your application.
@@ -44,14 +46,14 @@ return [
     /**
      * The Website of your application.
      */
-    'website' => env('NATIVEPHP_APP_WEBSITE', 'https://nativephp.com'),
+    'website' => env('NATIVEPHP_APP_WEBSITE', ''),
 
     /**
      * The default service provider for your application. This provider
      * takes care of bootstrapping your application and configuring
      * any global hotkeys, menus, windows, etc.
      */
-    'provider' => \App\Providers\NativeAppServiceProvider::class,
+    'provider' => NativeAppServiceProvider::class,
 
     /**
      * A list of environment keys that should be removed from the
@@ -59,9 +61,15 @@ return [
      * You may use wildcards to match multiple keys.
      */
     'cleanup_env_keys' => [
+        'APP_ENV',
+        'APP_DEBUG',
         'AWS_*',
         'AZURE_*',
-        'GITHUB_*',
+        'DB_PASSWORD',
+        'GITHUB_TOKEN',
+        'GITHUB_AUTOUPDATE_TOKEN',
+        'MAIL_PASSWORD',
+        'REDIS_PASSWORD',
         'DO_SPACES_*',
         '*_SECRET',
         'BIFROST_*',
@@ -81,11 +89,20 @@ return [
      * You may use glob / wildcard patterns here.
      */
     'cleanup_exclude_files' => [
+        '.agents',
+        '.codex',
+        '.pnpm-store',
         'build',
-        'temp',
         'content',
+        'docs',
         'node_modules',
+        'scripts',
+        'temp',
+        'tests',
         '*/tests',
+        'PROJECT_REVIEW_AND_DMG_PLAN.md',
+        'README.md',
+        'phpunit.xml',
     ],
 
     /**
@@ -97,7 +114,7 @@ return [
          * updater will only work when your application is bundled
          * for production.
          */
-        'enabled' => env('NATIVEPHP_UPDATER_ENABLED', true),
+        'enabled' => env('NATIVEPHP_UPDATER_ENABLED', false),
 
         /**
          * The updater provider to use.
@@ -163,7 +180,7 @@ return [
      * Define your own scripts to run before and after the build process.
      */
     'prebuild' => [
-        // 'npm run build',
+        'npm run build',
     ],
 
     'postbuild' => [

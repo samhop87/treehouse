@@ -233,6 +233,25 @@ class GitService
             return $this->getStagedDiff([$path]);
         }
 
+        $untracked = $this->commandRunner->run([
+            'ls-files', '--others', '--exclude-standard', '-z', '--', $path,
+        ]);
+
+        if ($untracked->success && in_array($path, explode("\0", rtrim($untracked->output, "\0")), true)) {
+            // `git diff --no-index` uses exit code 1 when a difference exists.
+            $result = $this->commandRunner->run([
+                '-c', 'core.quotePath=false',
+                'diff', '--no-index', '--src-prefix=a/', '--dst-prefix=b/',
+                '--', '/dev/null', $path,
+            ], timeout: 60);
+
+            if (! in_array($result->exitCode, [0, 1], true)) {
+                $result->throw("Failed to preview untracked file {$path}");
+            }
+
+            return $this->diffParser->parse($result->output);
+        }
+
         return $this->getUnstagedDiff([$path]);
     }
 
@@ -493,7 +512,11 @@ class GitService
     /**
      * Delete the local branch and its paired remote branch when present.
      */
-    public function deleteBranchAndRemote(string $name, bool $forceLocal = false): GitResult
+    public function deleteBranchAndRemote(
+        string $name,
+        bool $forceLocal = false,
+        ?string $confirmedRemoteRef = null,
+    ): GitResult
     {
         $this->ensureOpen();
 
@@ -501,7 +524,7 @@ class GitService
         $matchingRemote = collect($branches)
             ->first(fn (Branch $branch) => $branch->isRemote && $branch->name === $name);
         $localName = $matchingRemote !== null ? $this->localBranchNameFromRemoteRef($matchingRemote->name) : $name;
-        $remoteRef = $this->resolveRemoteBranchRef($name, $branches);
+        $remoteRef = $confirmedRemoteRef ?? $this->resolveRemoteBranchRef($name, $branches);
 
         $localExists = collect($branches)
             ->contains(fn (Branch $branch) => ! $branch->isRemote && $branch->name === $localName);
@@ -551,6 +574,76 @@ class GitService
         $result->throw('Failed to abort merge');
 
         return $result;
+    }
+
+    /**
+     * Rebase the current branch onto another ref.
+     *
+     * Conflicts are returned to the caller so the UI can expose recovery.
+     */
+    public function rebase(string $target): GitResult
+    {
+        $this->ensureOpen();
+
+        return $this->commandRunner->runWithTranslation(['rebase', $target], timeout: 120);
+    }
+
+    /**
+     * Detect the Git operation whose recovery controls should be shown.
+     */
+    public function getOperationState(): ?string
+    {
+        $this->ensureOpen();
+
+        if ($this->gitPathExists('rebase-merge') || $this->gitPathExists('rebase-apply')) {
+            return 'rebase';
+        }
+
+        foreach (['MERGE_HEAD' => 'merge', 'CHERRY_PICK_HEAD' => 'cherry-pick', 'REVERT_HEAD' => 'revert'] as $path => $operation) {
+            if ($this->gitPathExists($path)) {
+                return $operation;
+            }
+        }
+
+        return null;
+    }
+
+    public function continueOperation(string $operation): GitResult
+    {
+        $this->ensureOpen();
+        $args = match ($operation) {
+            'rebase' => ['-c', 'core.editor=true', 'rebase', '--continue'],
+            'merge' => ['-c', 'core.editor=true', 'merge', '--continue'],
+            'cherry-pick' => ['-c', 'core.editor=true', 'cherry-pick', '--continue'],
+            'revert' => ['-c', 'core.editor=true', 'revert', '--continue'],
+            default => throw new \InvalidArgumentException("Unsupported Git operation: {$operation}"),
+        };
+
+        return $this->commandRunner->runWithTranslation($args, timeout: 120);
+    }
+
+    public function abortOperation(string $operation): GitResult
+    {
+        $this->ensureOpen();
+        $args = match ($operation) {
+            'rebase' => ['rebase', '--abort'],
+            'merge' => ['merge', '--abort'],
+            'cherry-pick' => ['cherry-pick', '--abort'],
+            'revert' => ['revert', '--abort'],
+            default => throw new \InvalidArgumentException("Unsupported Git operation: {$operation}"),
+        };
+
+        $result = $this->commandRunner->runWithTranslation($args, timeout: 120);
+        $result->throw("Failed to abort {$operation}");
+
+        return $result;
+    }
+
+    public function skipRebaseCommit(): GitResult
+    {
+        $this->ensureOpen();
+
+        return $this->commandRunner->runWithTranslation(['rebase', '--skip'], timeout: 120);
     }
 
     // ─── TAG OPERATIONS ─────────────────────────────────────────────────
@@ -723,7 +816,9 @@ class GitService
     {
         $this->ensureOpen();
 
-        $args = ['pull', $remote];
+        // Avoid inheriting a machine-specific pull.rebase setting. The toolbar's
+        // Pull action always performs a merge-style pull; rebase is explicit.
+        $args = ['pull', '--no-rebase', $remote];
         if ($branch !== null) {
             $args[] = $branch;
         }
@@ -856,6 +951,21 @@ class GitService
             ->first(fn (Branch $branch) => $branch->isRemote && $this->localBranchNameFromRemoteRef($branch->name) === $localName);
 
         return $pairedRemote?->name;
+    }
+
+    private function gitPathExists(string $name): bool
+    {
+        $result = $this->commandRunner->run(['rev-parse', '--git-path', $name]);
+        if (! $result->success || trim($result->output) === '') {
+            return false;
+        }
+
+        $path = trim($result->output);
+        if (! str_starts_with($path, DIRECTORY_SEPARATOR)) {
+            $path = $this->repoPath.DIRECTORY_SEPARATOR.$path;
+        }
+
+        return file_exists($path);
     }
 
     /**

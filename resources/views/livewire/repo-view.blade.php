@@ -145,17 +145,40 @@
                 </div>
             @endif
 
-            @if ($status && $status['hasConflicts'])
+            @if ($showRebaseConfirm)
+                <div class="border-b border-[#343944] px-3 py-2.5">
+                    <div class="rounded-lg border border-cyan-800/40 bg-[#17252d] p-2">
+                        <div class="mb-1.5 text-xs text-gray-300">
+                            Rebase <span class="font-medium text-gray-100">{{ $currentBranch }}</span> onto <span class="font-medium text-gray-100">{{ $rebaseTargetName }}</span>?
+                        </div>
+                        <div class="flex gap-1">
+                            <button wire:click="rebaseBranch" class="flex-1 rounded bg-cyan-700 px-2 py-1 text-[10px] font-medium text-white hover:bg-cyan-600 cursor-pointer">Rebase</button>
+                            <button wire:click="closeRebase" class="rounded bg-[#141420] px-2 py-1 text-[10px] text-gray-300 hover:bg-[#1a1a2e] cursor-pointer">Cancel</button>
+                        </div>
+                    </div>
+                </div>
+            @endif
+
+            @if ($currentOperation)
                 <div class="border-b border-[#343944] px-3 py-2.5">
                     <div class="rounded-lg border border-red-800/50 bg-red-900/20 p-2">
-                        <div class="mb-1 text-xs text-red-400">Merge conflicts detected</div>
-                        <button
-                            wire:click="mergeAbort"
-                            wire:confirm="Abort the current merge? All merge changes will be lost."
-                            class="w-full rounded bg-red-700 px-2 py-1 text-[10px] font-medium text-white transition-colors hover:bg-red-600 cursor-pointer"
-                        >
-                            Abort Merge
-                        </button>
+                        <div class="text-xs font-medium text-red-300">{{ ucfirst(str_replace('-', ' ', $currentOperation)) }} in progress</div>
+                        <div class="mt-1 text-[10px] leading-relaxed text-red-400/80">
+                            @if ($status && $status['hasConflicts'])
+                                Resolve each file, stage it, then continue.
+                            @else
+                                The operation is ready to continue or abort.
+                            @endif
+                        </div>
+                        @if ($currentOperation !== 'conflict')
+                            <div class="mt-2 grid grid-cols-2 gap-1">
+                                <button wire:click="continueCurrentOperation" class="rounded bg-violet-600 px-2 py-1 text-[10px] font-medium text-white hover:bg-violet-500 cursor-pointer">Continue</button>
+                                <button wire:click="abortCurrentOperation" wire:confirm="Abort the current {{ str_replace('-', ' ', $currentOperation) }}?" class="rounded bg-red-700 px-2 py-1 text-[10px] font-medium text-white hover:bg-red-600 cursor-pointer">Abort</button>
+                            </div>
+                            @if ($currentOperation === 'rebase')
+                                <button wire:click="skipRebaseCommit" wire:confirm="Skip this commit? Its changes will be omitted from the rebased branch." class="mt-1 w-full rounded border border-red-800/50 px-2 py-1 text-[10px] text-red-300 hover:bg-red-900/30 cursor-pointer">Skip commit</button>
+                            @endif
+                        @endif
                     </div>
                 </div>
             @endif
@@ -187,8 +210,8 @@
                     <div x-show="referenceSections.local" x-collapse class="border-t border-[#343944] bg-[#232730] px-2 py-2">
                         @forelse ($localBranches as $branch)
                             <div
-                                wire:click="selectBranch('{{ $branch['name'] }}')"
-                                @if (! $branch['isCurrent']) wire:dblclick="checkoutLocalBranch('{{ $branch['name'] }}')" @endif
+                                wire:click="selectBranch(@js($branch['name']))"
+                                @if (! $branch['isCurrent']) wire:dblclick="checkoutLocalBranch(@js($branch['name']))" @endif
                                 x-show="matchesReference(@js($branch['name']))"
                                 class="group mb-1 rounded-md border px-2 py-1.5 text-xs transition-colors cursor-pointer {{ $selectedHistoryType === 'branch' && $selectedBranch === $branch['name'] ? 'border-violet-600/40 bg-violet-900/25 text-gray-100' : ($branch['isCurrent'] ? 'border-violet-700/30 bg-violet-900/20 text-gray-100 hover:bg-violet-900/25' : 'border-transparent text-gray-400 hover:bg-[#1a1f27] hover:text-gray-300') }}"
                                 title="{{ $branch['isCurrent'] ? 'Click to inspect this branch' : 'Click to inspect this branch. Double-click to switch branches.' }}"
@@ -212,7 +235,7 @@
 
                                 <div class="mt-1 flex items-center justify-end gap-1 opacity-0 transition-opacity group-hover:opacity-100">
                                     <button
-                                        x-on:click.stop="navigator.clipboard.writeText('{{ $branch['name'] }}'); $dispatch('toast', { message: 'Branch name copied', type: 'success' })"
+                                        x-on:click.stop="navigator.clipboard.writeText(@js($branch['name'])); $dispatch('toast', { message: 'Branch name copied', type: 'success' })"
                                         class="rounded p-0.5 text-gray-600 hover:text-gray-300 cursor-pointer"
                                         title="Copy branch name"
                                     >
@@ -222,7 +245,7 @@
                                     </button>
                                     @if (! $branch['isCurrent'])
                                         <button
-                                            wire:click.stop="openMerge('{{ $branch['name'] }}')"
+                                            wire:click.stop="openMerge(@js($branch['name']))"
                                             class="rounded p-0.5 text-gray-600 hover:text-violet-400 cursor-pointer"
                                             title="Merge into {{ $currentBranch }}"
                                         >
@@ -231,7 +254,16 @@
                                             </svg>
                                         </button>
                                         <button
-                                            wire:click.stop="deleteBranch('{{ $branch['name'] }}')"
+                                            wire:click.stop="openRebase(@js($branch['name']))"
+                                            class="rounded p-0.5 text-gray-600 hover:text-cyan-400 cursor-pointer"
+                                            title="Rebase {{ $currentBranch }} onto {{ $branch['name'] }}"
+                                        >
+                                            <svg class="h-3 w-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" d="M5 5v11a3 3 0 003 3h3m8-14v5a3 3 0 01-3 3H8m8-11l3 3-3 3"/>
+                                            </svg>
+                                        </button>
+                                        <button
+                                            wire:click.stop="deleteBranch(@js($branch['name']))"
                                             wire:confirm="Delete branch '{{ $branch['name'] }}'?"
                                             class="rounded p-0.5 text-gray-600 hover:text-red-400 cursor-pointer"
                                             title="Delete branch"
@@ -275,8 +307,8 @@
                     <div x-show="referenceSections.remote" x-collapse class="border-t border-[#343944] bg-[#232730] px-2 py-2">
                         @forelse ($remoteBranches as $branch)
                             <div
-                                wire:click="selectBranch('{{ $branch['name'] }}')"
-                                wire:dblclick="checkoutRemoteBranch('{{ $branch['name'] }}')"
+                                wire:click="selectBranch(@js($branch['name']))"
+                                wire:dblclick="checkoutRemoteBranch(@js($branch['name']))"
                                 x-show="matchesReference(@js($branch['name']))"
                                 class="group mb-1 rounded-md border px-2 py-1.5 text-xs transition-colors cursor-pointer {{ $selectedHistoryType === 'branch' && $selectedBranch === $branch['name'] ? 'border-violet-600/40 bg-violet-900/25 text-gray-200' : 'border-transparent text-gray-500 hover:bg-[#1a1f27] hover:text-gray-300' }}"
                                 title="Click to inspect this branch. Double-click to checkout a local tracking branch."
@@ -289,6 +321,13 @@
                                     @if ($branch['hasLocalPair'])
                                         <span class="rounded border border-[#3b404b] bg-[#1b1f27] px-1.5 py-0.5 text-[9px] uppercase tracking-[0.16em] text-gray-500">Local</span>
                                     @endif
+                                    <button
+                                        wire:click.stop="openRebase(@js($branch['name']))"
+                                        class="rounded px-1 py-0.5 text-[9px] text-gray-600 opacity-0 transition-opacity hover:bg-[#1a1f27] hover:text-cyan-400 group-hover:opacity-100 cursor-pointer"
+                                        title="Rebase {{ $currentBranch }} onto {{ $branch['name'] }}"
+                                    >
+                                        Rebase
+                                    </button>
                                 </div>
                             </div>
                         @empty
@@ -367,21 +406,21 @@
                                     <span class="font-mono text-gray-500">{{ $stash['ref'] }}</span>
                                     <div class="ml-auto flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
                                         <button
-                                            wire:click="stashApply('{{ $stash['ref'] }}')"
+                                            wire:click="stashApply(@js($stash['ref']))"
                                             class="rounded px-1 py-0.5 text-[10px] text-gray-600 hover:bg-[#1a1a2e] hover:text-violet-400 cursor-pointer"
                                             title="Apply"
                                         >
                                             Apply
                                         </button>
                                         <button
-                                            wire:click="stashPop('{{ $stash['ref'] }}')"
+                                            wire:click="stashPop(@js($stash['ref']))"
                                             class="rounded px-1 py-0.5 text-[10px] text-gray-600 hover:bg-[#1a1a2e] hover:text-cyan-400 cursor-pointer"
                                             title="Pop"
                                         >
                                             Pop
                                         </button>
                                         <button
-                                            wire:click="stashDrop('{{ $stash['ref'] }}')"
+                                            wire:click="stashDrop(@js($stash['ref']))"
                                             wire:confirm="Drop {{ $stash['ref'] }}? This cannot be undone."
                                             class="rounded px-1 py-0.5 text-[10px] text-gray-600 hover:bg-[#1a1a2e] hover:text-red-400 cursor-pointer"
                                             title="Drop"
@@ -506,7 +545,7 @@
                                 <span class="shrink-0 font-mono text-[10px] text-gray-700">{{ substr($tag['commitHash'], 0, 7) }}</span>
                                 <div class="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
                                     <button
-                                        x-on:click="navigator.clipboard.writeText('{{ $tag['name'] }}'); $dispatch('toast', { message: 'Tag name copied', type: 'success' })"
+                                        x-on:click="navigator.clipboard.writeText(@js($tag['name'])); $dispatch('toast', { message: 'Tag name copied', type: 'success' })"
                                         class="rounded p-0.5 text-gray-600 hover:text-gray-300 cursor-pointer"
                                         title="Copy tag name"
                                     >
@@ -515,7 +554,7 @@
                                         </svg>
                                     </button>
                                     <button
-                                        wire:click="pushTag('{{ $tag['name'] }}')"
+                                        wire:click="pushTag(@js($tag['name']))"
                                         wire:confirm="Push tag '{{ $tag['name'] }}' to origin?"
                                         class="rounded p-0.5 text-gray-600 hover:text-teal-400 cursor-pointer"
                                         title="Push tag"
@@ -525,7 +564,7 @@
                                         </svg>
                                     </button>
                                     <button
-                                        wire:click="deleteTag('{{ $tag['name'] }}')"
+                                        wire:click="deleteTag(@js($tag['name']))"
                                         wire:confirm="Delete tag '{{ $tag['name'] }}'?"
                                         class="rounded p-0.5 text-gray-600 hover:text-red-400 cursor-pointer"
                                         title="Delete tag"
@@ -587,7 +626,7 @@
                                                 <span class="text-gray-600">Commit</span>
                                                 <span
                                                     class="cursor-pointer font-mono text-gray-400 transition-colors hover:text-gray-200"
-                                                    x-on:click="navigator.clipboard.writeText('{{ $selectedCommitData['hash'] }}'); $dispatch('toast', { message: 'Hash copied', type: 'success' })"
+                                                    x-on:click="navigator.clipboard.writeText(@js($selectedCommitData['hash'])); $dispatch('toast', { message: 'Hash copied', type: 'success' })"
                                                     title="Click to copy hash"
                                                 >{{ $selectedCommitData['hash'] }}</span>
 
@@ -704,8 +743,8 @@
                                             $commitHasRefs = count($commit['refs']) > 0;
                                         @endphp
                                         <div
-                                            wire:click="selectCommit('{{ $commit['hash'] }}')"
-                                            wire:dblclick="checkoutCommit('{{ $commit['hash'] }}')"
+                                            wire:click="selectCommit(@js($commit['hash']))"
+                                            wire:dblclick="checkoutCommit(@js($commit['hash']))"
                                             x-on:contextmenu.prevent.stop="$wire.openCommitContextMenu('{{ $commit['hash'] }}', $event.clientX, $event.clientY)"
                                             data-history-context-menu-trigger
                                             class="grid h-10 cursor-pointer items-stretch border-b border-[#232833] transition-colors hover:bg-[#202531] {{ $selectedHistoryType === 'commit' && $selectedCommit === $commit['hash'] ? 'bg-violet-900/20' : '' }}"
@@ -730,8 +769,8 @@
                                                                 $graphBranchContextTarget = $this->contextMenuBranchTarget($ref);
                                                             @endphp
                                                             <button
-                                                                wire:click.stop="selectGraphRef('{{ $ref }}')"
-                                                                wire:dblclick.stop="checkoutGraphRef('{{ $ref }}')"
+                                                                wire:click.stop="selectGraphRef(@js($ref))"
+                                                                wire:dblclick.stop="checkoutGraphRef(@js($ref))"
                                                                 x-on:contextmenu.prevent.stop="$wire.openBranchContextMenu(@js($ref), $event.clientX, $event.clientY)"
                                                                 data-history-context-menu-trigger
                                                                 class="shrink-0 whitespace-nowrap rounded border px-2.5 py-1 text-[11px] font-semibold transition-colors cursor-pointer {{ str_contains($ref, 'HEAD') ? 'border-cyan-800/50 bg-cyan-900/40 text-cyan-300 hover:bg-cyan-900/50' : (str_contains($ref, '/') ? 'border-[#2a2a42] bg-[#1a1a2e] text-gray-300 hover:bg-[#202035] hover:text-gray-100' : 'border-violet-800/50 bg-violet-900/40 text-violet-300 hover:bg-violet-900/50') }}"
@@ -909,7 +948,7 @@
                                     @endphp
 
                                     <button
-                                        wire:click="selectHistoryFile('{{ $diff['path'] }}')"
+                                        wire:click="selectHistoryFile(@js($diff['path']))"
                                         class="flex w-full items-center gap-3 rounded px-2 py-2 text-left transition-colors cursor-pointer {{ $selectedFile === $diff['path'] ? 'bg-violet-900/20' : 'hover:bg-[#1a1a2e]/50' }}"
                                     >
                                         <span class="w-3 shrink-0 text-center text-[10px] font-semibold {{ $historyStatusColor }}">
@@ -979,25 +1018,32 @@
                                 <div class="space-y-1">
                                     @forelse ($conflictedFiles as $file)
                                         <div
-                                            wire:click="selectFile('{{ $file['path'] }}')"
+                                            wire:click="selectFile(@js($file['path']))"
                                             class="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-xs transition-colors hover:bg-[#1a1a2e]/50 {{ $selectedFile === $file['path'] && ! $selectedFileStaged ? 'bg-violet-900/20' : '' }}"
                                         >
                                             <span class="w-2 shrink-0 text-red-500">!</span>
                                             <span class="min-w-0 flex-1 truncate text-red-400">{{ $file['path'] }}</span>
+                                            <button
+                                                wire:click.stop="stageFile(@js($file['path']))"
+                                                class="rounded px-1.5 py-0.5 text-[10px] text-red-300 hover:bg-red-900/30 hover:text-white cursor-pointer"
+                                                title="Mark resolved by staging this file"
+                                            >
+                                                Stage resolved
+                                            </button>
                                         </div>
                                     @empty
                                     @endforelse
 
                                     @foreach ($unstagedFiles as $file)
                                         <div
-                                            wire:click="selectFile('{{ $file['path'] }}')"
+                                            wire:click="selectFile(@js($file['path']))"
                                             class="group flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-xs transition-colors hover:bg-[#1a1a2e]/50 {{ $selectedFile === $file['path'] && ! $selectedFileStaged ? 'bg-violet-900/20' : '' }}"
                                         >
                                             <span class="w-2 shrink-0 text-cyan-500">{{ substr($file['workStatus'], 0, 1) }}</span>
                                             <span class="min-w-0 flex-1 truncate text-gray-400">{{ $file['path'] }}</span>
                                             <div class="ml-auto flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
                                                 <button
-                                                    wire:click.stop="stageFile('{{ $file['path'] }}')"
+                                                    wire:click.stop="stageFile(@js($file['path']))"
                                                     class="rounded p-0.5 text-gray-600 hover:text-violet-400 cursor-pointer"
                                                     title="Stage"
                                                 >
@@ -1006,7 +1052,7 @@
                                                     </svg>
                                                 </button>
                                                 <button
-                                                    wire:click.stop="discardFile('{{ $file['path'] }}')"
+                                                    wire:click.stop="discardFile(@js($file['path']))"
                                                     wire:confirm="Discard changes to {{ $file['path'] }}?"
                                                     class="rounded p-0.5 text-gray-600 hover:text-red-400 cursor-pointer"
                                                     title="Discard"
@@ -1021,13 +1067,13 @@
 
                                     @foreach ($untrackedFiles as $file)
                                         <div
-                                            wire:click="selectFile('{{ $file['path'] }}')"
+                                            wire:click="selectFile(@js($file['path']))"
                                             class="group flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-xs transition-colors hover:bg-[#1a1a2e]/50 {{ $selectedFile === $file['path'] && ! $selectedFileStaged ? 'bg-violet-900/20' : '' }}"
                                         >
                                             <span class="w-2 shrink-0 text-gray-600">?</span>
                                             <span class="min-w-0 flex-1 truncate text-gray-500">{{ $file['path'] }}</span>
                                             <button
-                                                wire:click.stop="stageFile('{{ $file['path'] }}')"
+                                                wire:click.stop="stageFile(@js($file['path']))"
                                                 class="ml-auto rounded p-0.5 opacity-0 text-gray-600 transition-opacity group-hover:opacity-100 hover:text-violet-400 cursor-pointer"
                                                 title="Stage"
                                             >
@@ -1064,13 +1110,13 @@
                                 <div class="space-y-1">
                                     @forelse ($stagedFiles as $file)
                                         <div
-                                            wire:click="selectFile('{{ $file['path'] }}', true)"
+                                            wire:click="selectFile(@js($file['path']), true)"
                                             class="group flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-xs transition-colors hover:bg-[#1a1a2e]/50 {{ $selectedFile === $file['path'] && $selectedFileStaged ? 'bg-violet-900/20' : '' }}"
                                         >
                                             <span class="w-2 shrink-0 text-teal-400">{{ substr($file['indexStatus'], 0, 1) }}</span>
                                             <span class="min-w-0 flex-1 truncate text-gray-400">{{ $file['path'] }}</span>
                                             <button
-                                                wire:click.stop="unstageFile('{{ $file['path'] }}')"
+                                                wire:click.stop="unstageFile(@js($file['path']))"
                                                 class="ml-auto rounded p-0.5 opacity-0 text-gray-600 transition-opacity group-hover:opacity-100 hover:text-gray-300 cursor-pointer"
                                                 title="Unstage"
                                             >
@@ -1097,14 +1143,14 @@
                                 class="w-full resize-none rounded border border-[#2a2a42] bg-[#11111b] px-3 py-2 text-sm text-gray-200 placeholder:text-gray-600 focus:border-violet-600 focus:outline-none"
                             ></textarea>
                             <button
-                                wire:click="commit"
+                                wire:click="createCommit"
                                 wire:loading.attr="disabled"
                                 @if (count($stagedFiles) === 0) disabled @endif
                                 class="mt-3 w-full rounded border px-3 py-2 text-sm font-medium transition-colors {{ count($stagedFiles) > 0 ? 'border-violet-700/40 bg-violet-600 text-white hover:bg-violet-500 cursor-pointer' : 'border-[#2a2a42] bg-[#141420] text-gray-600 cursor-not-allowed' }}"
                             >
                                 @if (count($stagedFiles) > 0)
-                                    <span wire:loading.remove wire:target="commit">Commit {{ count($stagedFiles) }} file{{ count($stagedFiles) === 1 ? '' : 's' }}</span>
-                                    <span wire:loading wire:target="commit">Committing...</span>
+                                    <span wire:loading.remove wire:target="createCommit">Commit {{ count($stagedFiles) }} file{{ count($stagedFiles) === 1 ? '' : 's' }}</span>
+                                    <span wire:loading wire:target="createCommit">Committing...</span>
                                 @else
                                     <span>Stage changes to commit</span>
                                 @endif
@@ -1145,6 +1191,15 @@
                 @endif
 
                 @if (($contextMenuTarget['type'] ?? null) === 'branch')
+                    @if (! ($contextMenuTarget['isCurrent'] ?? false))
+                        <button
+                            wire:click="rebaseContextMenuBranchAction"
+                            class="flex w-full items-center justify-between px-3 py-2 text-left text-xs text-gray-300 transition-colors hover:bg-[#1a1a2e] hover:text-cyan-300 cursor-pointer"
+                        >
+                            <span>Rebase current branch onto this</span>
+                        </button>
+                    @endif
+
                     <button
                         wire:click="deleteContextMenuBranchAction"
                         wire:confirm="Delete branch '{{ $contextMenuTarget['displayName'] ?? 'branch' }}'?"

@@ -50,6 +50,9 @@ class RepoView extends Component
     public array $untrackedFiles = [];
     public array $conflictedFiles = [];
 
+    /** In-progress Git operation that owns any recovery controls. */
+    public ?string $currentOperation = null;
+
     /** Currently selected file for diff view */
     public ?string $selectedFile = null;
     public bool $selectedFileStaged = false;
@@ -126,6 +129,10 @@ class RepoView extends Component
             // Load status
             $state = $git->getStatus();
             $this->populateStatusFromState($state);
+            $this->currentOperation = $git->getOperationState();
+            if ($state->hasConflicts() && $this->currentOperation === null) {
+                $this->currentOperation = 'conflict';
+            }
 
             // Load commits
             $commits = $git->getLog(limit: 200, all: true);
@@ -467,6 +474,20 @@ class RepoView extends Component
         }
     }
 
+    public function rebaseContextMenuBranchAction(): void
+    {
+        if (($this->contextMenuTarget['type'] ?? null) !== 'branch') {
+            return;
+        }
+
+        $name = $this->contextMenuTarget['ref'] ?? null;
+        $this->closeContextMenu();
+
+        if (is_string($name) && $name !== '') {
+            $this->openRebase($name);
+        }
+    }
+
     /**
      * Select a branch ref from the center graph.
      */
@@ -565,7 +586,13 @@ class RepoView extends Component
      */
     public function unstageFile(string $path): void
     {
-        $this->runGitAction(fn (GitService $git) => $git->unstage([$path]));
+        $file = collect($this->stagedFiles)->firstWhere('path', $path);
+        $paths = array_values(array_unique(array_filter([
+            $path,
+            $file['origPath'] ?? null,
+        ])));
+
+        $this->runGitAction(fn (GitService $git) => $git->unstage($paths));
     }
 
     /**
@@ -591,7 +618,7 @@ class RepoView extends Component
     /**
      * Create a commit with the current message.
      */
-    public function commit(): void
+    public function createCommit(): void
     {
         if (trim($this->commitMessage) === '') {
             $this->errorMessage = 'Commit message cannot be empty.';
@@ -599,10 +626,13 @@ class RepoView extends Component
         }
 
         $msg = $this->commitMessage;
-        $this->runGitAction(function (GitService $git) {
-            $git->commit($this->commitMessage);
-            $this->commitMessage = '';
+        $this->runGitAction(function (GitService $git) use ($msg) {
+            $git->commit($msg);
         }, 'Committed: ' . \Illuminate\Support\Str::limit(trim($msg), 50));
+
+        if ($this->errorMessage === '') {
+            $this->commitMessage = '';
+        }
     }
 
     // ─── BRANCH ACTIONS ──────────────────────────────────────────────────
@@ -615,6 +645,10 @@ class RepoView extends Component
     /** State for merge UI */
     public bool $showMergeConfirm = false;
     public string $mergeBranchName = '';
+
+    /** State for rebase UI */
+    public bool $showRebaseConfirm = false;
+    public string $rebaseTargetName = '';
 
     /**
      * Checkout an existing branch.
@@ -755,7 +789,7 @@ class RepoView extends Component
             : "Deleted branch '{$localName}'";
 
         $this->runGitAction(
-            fn (GitService $git) => $git->deleteBranchAndRemote($name, $forceLocal),
+            fn (GitService $git) => $git->deleteBranchAndRemote($localName, $forceLocal, $remoteName),
             $message
         );
     }
@@ -765,6 +799,7 @@ class RepoView extends Component
      */
     public function openMerge(string $name): void
     {
+        $this->closeRebase();
         $this->showMergeConfirm = true;
         $this->mergeBranchName = $name;
     }
@@ -798,16 +833,12 @@ class RepoView extends Component
             $git->open($this->path);
 
             $result = $git->merge($branch);
-
-            if (! $result->success) {
-                // Surface merge conflicts or errors without throwing
-                $this->errorMessage = $result->error ?: 'Merge failed.';
-            }
-
             $this->loadRepoData();
 
             if ($result->success) {
                 $this->dispatch('toast', message: "Merged '{$branch}'", type: 'success');
+            } else {
+                $this->errorMessage = $result->error ?: 'Merge failed.';
             }
         } catch (\RuntimeException $e) {
             $this->errorMessage = $e->getMessage();
@@ -819,7 +850,84 @@ class RepoView extends Component
      */
     public function mergeAbort(): void
     {
-        $this->runGitAction(fn (GitService $git) => $git->mergeAbort(), 'Merge aborted');
+        $this->abortCurrentOperation();
+    }
+
+    public function openRebase(string $target): void
+    {
+        $this->closeMerge();
+        $this->showRebaseConfirm = true;
+        $this->rebaseTargetName = $target;
+    }
+
+    public function closeRebase(): void
+    {
+        $this->showRebaseConfirm = false;
+        $this->rebaseTargetName = '';
+    }
+
+    public function rebaseBranch(): void
+    {
+        $target = trim($this->rebaseTargetName);
+        $this->closeRebase();
+
+        if ($target === '' || $target === $this->currentBranch) {
+            $this->errorMessage = 'Choose another branch to rebase onto.';
+            return;
+        }
+
+        if (! ($this->status['isClean'] ?? false)) {
+            $this->errorMessage = 'Commit or stash your changes before rebasing.';
+            return;
+        }
+
+        $this->runRecoverableOperation(
+            fn (GitService $git) => $git->rebase($target),
+            "Rebased '{$this->currentBranch}' onto '{$target}'",
+            'Rebase failed.'
+        );
+    }
+
+    public function continueCurrentOperation(): void
+    {
+        if ($this->currentOperation === null || $this->currentOperation === 'conflict') {
+            $this->errorMessage = 'Unable to determine which Git operation to continue.';
+            return;
+        }
+
+        $operation = $this->currentOperation;
+        $this->runRecoverableOperation(
+            fn (GitService $git) => $git->continueOperation($operation),
+            ucfirst($operation).' continued',
+            'Unable to continue '.str_replace('-', ' ', $operation).'.'
+        );
+    }
+
+    public function abortCurrentOperation(): void
+    {
+        if ($this->currentOperation === null || $this->currentOperation === 'conflict') {
+            $this->errorMessage = 'Unable to determine which Git operation to abort.';
+            return;
+        }
+
+        $operation = $this->currentOperation;
+        $this->runGitAction(
+            fn (GitService $git) => $git->abortOperation($operation),
+            ucfirst($operation).' aborted'
+        );
+    }
+
+    public function skipRebaseCommit(): void
+    {
+        if ($this->currentOperation !== 'rebase') {
+            return;
+        }
+
+        $this->runRecoverableOperation(
+            fn (GitService $git) => $git->skipRebaseCommit(),
+            'Skipped commit and continued rebase',
+            'Unable to skip this rebase commit.'
+        );
     }
 
     // ─── TAG ACTIONS ─────────────────────────────────────────────────────
@@ -974,15 +1082,12 @@ class RepoView extends Component
             $git = app(GitService::class);
             $git->open($this->path);
             $result = $git->stashApply($ref);
-
-            if (! $result->success) {
-                $this->errorMessage = $result->error ?: 'Failed to apply stash.';
-            }
-
             $this->loadRepoData();
 
             if ($result->success) {
                 $this->dispatch('toast', message: "Applied {$ref}", type: 'success');
+            } else {
+                $this->errorMessage = $result->error ?: 'Failed to apply stash.';
             }
         } catch (\RuntimeException $e) {
             $this->errorMessage = $e->getMessage();
@@ -1000,15 +1105,12 @@ class RepoView extends Component
             $git = app(GitService::class);
             $git->open($this->path);
             $result = $git->stashPop($ref);
-
-            if (! $result->success) {
-                $this->errorMessage = $result->error ?: 'Failed to pop stash.';
-            }
-
             $this->loadRepoData();
 
             if ($result->success) {
                 $this->dispatch('toast', message: "Popped {$ref}", type: 'success');
+            } else {
+                $this->errorMessage = $result->error ?: 'Failed to pop stash.';
             }
         } catch (\RuntimeException $e) {
             $this->errorMessage = $e->getMessage();
@@ -1031,6 +1133,9 @@ class RepoView extends Component
     /** Progress message from async ChildProcess */
     public string $remoteProgress = '';
 
+    /** Recent stderr from the active remote operation. */
+    public string $remoteErrorOutput = '';
+
     /**
      * Fetch from remote.
      */
@@ -1045,6 +1150,7 @@ class RepoView extends Component
         if ($this->isNativeContext()) {
             $this->remoteOperation = 'fetch';
             $this->remoteProgress = 'Fetching...';
+            $this->remoteErrorOutput = '';
             ChildProcess::start(
                 cmd: ['git', 'fetch', '--prune'],
                 alias: $this->remoteOperationAlias(),
@@ -1078,8 +1184,9 @@ class RepoView extends Component
         if ($this->isNativeContext()) {
             $this->remoteOperation = 'pull';
             $this->remoteProgress = 'Pulling...';
+            $this->remoteErrorOutput = '';
             ChildProcess::start(
-                cmd: ['git', 'pull'],
+                cmd: ['git', 'pull', '--no-rebase'],
                 alias: $this->remoteOperationAlias(),
                 cwd: $this->path,
             );
@@ -1088,15 +1195,12 @@ class RepoView extends Component
                 $git = app(GitService::class);
                 $git->open($this->path);
                 $result = $git->pull();
-
-                if (! $result->success) {
-                    $this->errorMessage = $result->error ?: 'Pull failed.';
-                }
-
                 $this->loadRepoData();
 
                 if ($result->success) {
                     $this->dispatch('toast', message: 'Pulled from remote', type: 'success');
+                } else {
+                    $this->errorMessage = $result->error ?: 'Pull failed.';
                 }
             } catch (\RuntimeException $e) {
                 $this->errorMessage = $e->getMessage();
@@ -1120,6 +1224,7 @@ class RepoView extends Component
         if ($this->isNativeContext()) {
             $this->remoteOperation = 'push';
             $this->remoteProgress = 'Pushing...';
+            $this->remoteErrorOutput = '';
 
             $cmd = ['git', 'push'];
             if ($setUpstream && $this->currentBranch) {
@@ -1158,16 +1263,19 @@ class RepoView extends Component
         }
 
         $op = $this->remoteOperation;
+        $errorOutput = trim($this->remoteErrorOutput);
         $this->remoteOperation = null;
         $this->remoteProgress = '';
-
-        // If the last progress line looked like an error, surface it
-        // Otherwise just refresh
+        $this->remoteErrorOutput = '';
         $this->loadRepoData();
 
-        // For pull, check if we now have conflicts
         if ($op === 'pull' && $this->status && $this->status['hasConflicts']) {
             $this->errorMessage = 'Pull resulted in merge conflicts. Resolve them and commit, or abort the merge.';
+        } elseif ($code !== 0) {
+            $label = ucfirst($op).' failed';
+            $this->errorMessage = $errorOutput !== ''
+                ? "{$label}: {$errorOutput}"
+                : "{$label} with exit code {$code}.";
         } else {
             $label = match ($op) {
                 'fetch' => 'Fetched from remote',
@@ -1191,8 +1299,11 @@ class RepoView extends Component
 
         if (is_string($data)) {
             $this->remoteProgress = $data;
+            $this->remoteErrorOutput = mb_substr($this->remoteErrorOutput.$data, -4000);
         } elseif (is_array($data) && isset($data['data'])) {
-            $this->remoteProgress = $data['data'];
+            $chunk = (string) $data['data'];
+            $this->remoteProgress = $chunk;
+            $this->remoteErrorOutput = mb_substr($this->remoteErrorOutput.$chunk, -4000);
         }
     }
 
@@ -1218,7 +1329,7 @@ class RepoView extends Component
             'push' => $this->pushRemote(),
             'fetch' => $this->fetchRemote(),
             'pull' => $this->pullRemote(),
-            'commit' => $this->commit(),
+            'commit' => $this->createCommit(),
             'escape' => $this->closeTransientUi(),
             default => null,
         };
@@ -1248,6 +1359,29 @@ class RepoView extends Component
         }
     }
 
+    private function runRecoverableOperation(
+        callable $action,
+        string $successMessage,
+        string $fallbackError,
+    ): void {
+        $this->errorMessage = '';
+
+        try {
+            $git = app(GitService::class);
+            $git->open($this->path);
+            $result = $action($git);
+            $this->loadRepoData();
+
+            if ($result->success) {
+                $this->dispatch('toast', message: $successMessage, type: 'success');
+            } else {
+                $this->errorMessage = $result->error ?: $fallbackError;
+            }
+        } catch (\RuntimeException $e) {
+            $this->errorMessage = $e->getMessage();
+        }
+    }
+
     private function closeTransientUi(): void
     {
         $this->closeContextMenu();
@@ -1256,6 +1390,7 @@ class RepoView extends Component
         $this->closeCreateTag();
         $this->closeCreateStash();
         $this->closeMerge();
+        $this->closeRebase();
     }
 
     private function remoteOperationAlias(): string

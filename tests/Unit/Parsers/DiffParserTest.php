@@ -338,4 +338,23 @@ DIFF;
         $this->assertSame(5, $hunk->newStart);
         $this->assertSame(1, $hunk->newCount);
     }
+
+    #[Test]
+    public function it_decodes_git_quoted_paths(): void
+    {
+        $output = <<<'DIFF'
+diff --git "a/tab\tname.txt" "b/tab\tname.txt"
+index abc..def 100644
+--- "a/tab\tname.txt"
++++ "b/tab\tname.txt"
+@@ -1 +1 @@
+-old
++new
+DIFF;
+
+        $files = $this->parser->parse($output);
+
+        $this->assertCount(1, $files);
+        $this->assertSame("tab\tname.txt", $files[0]->path);
+    }
 }

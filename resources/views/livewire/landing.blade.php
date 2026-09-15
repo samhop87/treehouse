@@ -2,8 +2,12 @@
     <div class="text-center space-y-8 max-w-md w-full px-6">
         {{-- Logo / App name --}}
         <div>
+            <img src="/icon.png" alt="" class="mx-auto mb-4 h-20 w-20 rounded-[22%] shadow-lg shadow-violet-950/50">
             <h1 class="text-4xl font-bold text-gray-100 tracking-tight">Treehouse</h1>
             <p class="mt-2 text-sm text-purple-400/60">A desktop Git client</p>
+            @if ($gitVersion)
+                <p class="mt-1 text-[10px] text-gray-700">Git {{ $gitVersion }}</p>
+            @endif
         </div>
 
         {{-- Error message --}}
@@ -19,18 +23,25 @@
             <button
                 wire:click="openRepo"
                 wire:loading.attr="disabled"
+                @disabled($gitVersion === null)
                 class="w-full px-6 py-3 bg-violet-600 hover:bg-violet-500 text-white font-medium rounded-lg transition-colors duration-150 cursor-pointer disabled:opacity-50 glow-violet"
             >
                 <span wire:loading.remove wire:target="openRepo">Open Repository</span>
                 <span wire:loading wire:target="openRepo">Opening...</span>
             </button>
-            <a
-                href="/clone"
-                wire:navigate
-                class="w-full px-6 py-3 bg-[#1a1a2e] hover:bg-[#141420] text-gray-200 font-medium rounded-lg border border-[#2a2a42] transition-colors duration-150 cursor-pointer text-center block"
-            >
-                Clone Repository
-            </a>
+            @if ($gitVersion)
+                <a
+                    href="/clone"
+                    wire:navigate
+                    class="w-full px-6 py-3 bg-[#1a1a2e] hover:bg-[#141420] text-gray-200 font-medium rounded-lg border border-[#2a2a42] transition-colors duration-150 cursor-pointer text-center block"
+                >
+                    Clone Repository
+                </a>
+            @else
+                <span class="w-full px-6 py-3 bg-[#1a1a2e] text-gray-600 font-medium rounded-lg border border-[#2a2a42] text-center block">
+                    Clone Repository
+                </span>
+            @endif
         </div>
 
         {{-- Recent repos --}}
@@ -42,7 +53,7 @@
                     @foreach ($recentRepos as $repo)
                         <div
                             class="group flex items-center justify-between px-3 py-2 rounded-lg hover:bg-[#1a1a2e] transition-colors cursor-pointer"
-                            wire:click="openRepoByPath('{{ $repo['path'] }}')"
+                            wire:click="openRepoByPath(@js($repo['path']))"
                         >
                             <div class="min-w-0 flex-1">
                                 <div class="text-sm font-medium text-gray-200 truncate">{{ $repo['name'] }}</div>
@@ -56,7 +67,7 @@
                             <div class="flex items-center gap-2 ml-3 shrink-0">
                                 <span class="text-xs text-gray-600">{{ $repo['last_opened_at'] }}</span>
                                 <button
-                                    wire:click.stop="removeRecent('{{ $repo['path'] }}')"
+                                    wire:click.stop="removeRecent(@js($repo['path']))"
                                     class="opacity-0 group-hover:opacity-100 text-gray-600 hover:text-gray-400 transition-all cursor-pointer p-1"
                                     title="Remove from recent"
                                 >

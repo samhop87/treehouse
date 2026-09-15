@@ -56,12 +56,12 @@ class DiffParser
 
         // Parse the "diff --git a/path b/path" header
         $header = $lines[0];
-        if (! preg_match('#^diff --git a/(.*?) b/(.*)$#', $header, $m)) {
+        $paths = $this->parseHeaderPaths($header);
+        if ($paths === null) {
             return null;
         }
 
-        $oldPath = $m[1];
-        $newPath = $m[2];
+        [$oldPath, $newPath] = $paths;
         $status = 'modified';
         $isBinary = false;
         $renamedFrom = null;
@@ -125,6 +125,46 @@ class DiffParser
             isBinary: $isBinary,
             hunks: $hunks,
         );
+    }
+
+    /** @return array{0: string, 1: string}|null */
+    private function parseHeaderPaths(string $header): ?array
+    {
+        $body = str_starts_with($header, 'diff --git ')
+            ? substr($header, strlen('diff --git '))
+            : '';
+
+        $patterns = [
+            '/^("(?:\\\\.|[^"])*") ("(?:\\\\.|[^"])*")$/',
+            '/^("(?:\\\\.|[^"])*") (b\/.*)$/',
+            '/^(a\/.*?) ("(?:\\\\.|[^"])*")$/',
+        ];
+
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $body, $matches)) {
+                return [
+                    $this->decodeHeaderPath($matches[1], 'a/'),
+                    $this->decodeHeaderPath($matches[2], 'b/'),
+                ];
+            }
+        }
+
+        if (preg_match('#^a/(.*?) b/(.*)$#', $body, $matches)) {
+            return [$matches[1], $matches[2]];
+        }
+
+        return null;
+    }
+
+    private function decodeHeaderPath(string $token, string $prefix): string
+    {
+        if (str_starts_with($token, '"') && str_ends_with($token, '"')) {
+            $token = stripcslashes(substr($token, 1, -1));
+        }
+
+        return str_starts_with($token, $prefix)
+            ? substr($token, strlen($prefix))
+            : $token;
     }
 
     /**
