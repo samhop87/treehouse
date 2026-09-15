@@ -15,10 +15,12 @@ use Native\Desktop\Dialog;
 #[Title('Treehouse')]
 class Workspace extends Component
 {
+    private const MAX_RECENT_BRANCHES = 5;
+
     #[Url]
     public string $path = '';
 
-    /** @var array<int, array{id: string, path: string, repoName: string, currentBranch: ?string, isDetached: bool}> */
+    /** @var array<int, array{id: string, path: string, repoName: string, currentBranch: ?string, isDetached: bool, localBranches: list<string>, recentBranches: list<string>}> */
     public array $tabs = [];
 
     public ?string $activeTabId = null;
@@ -31,6 +33,7 @@ class Workspace extends Component
     {
         if (trim($this->path) === '') {
             $this->redirect('/');
+
             return;
         }
 
@@ -54,6 +57,7 @@ class Workspace extends Component
 
         if (! $this->isNativeContext()) {
             $this->errorMessage = 'Folder picker is only available in the desktop app.';
+
             return;
         }
 
@@ -99,6 +103,7 @@ class Workspace extends Component
         if (count($this->tabs) === 0) {
             $this->activeTabId = null;
             $this->redirect('/');
+
             return;
         }
 
@@ -117,6 +122,7 @@ class Workspace extends Component
         ?string $currentBranch = null,
         ?string $path = null,
         bool $isDetached = false,
+        ?array $localBranches = null,
     ): void {
         $index = $this->findTabIndexById($tabId);
         if ($index === null) {
@@ -127,6 +133,12 @@ class Workspace extends Component
         $this->tabs[$index]['currentBranch'] = $currentBranch;
         $this->tabs[$index]['isDetached'] = $isDetached;
 
+        if ($localBranches !== null) {
+            $this->tabs[$index]['localBranches'] = $this->normalizeBranchNames($localBranches, $currentBranch);
+        }
+
+        $this->rememberRecentBranch($index, $currentBranch);
+
         if ($path !== null && $path !== '') {
             $this->tabs[$index]['path'] = $path;
         }
@@ -136,7 +148,7 @@ class Workspace extends Component
         }
     }
 
-    #[On('native:' . OpenRepoRequested::class)]
+    #[On('native:'.OpenRepoRequested::class)]
     public function onMenuOpenRepo(): void
     {
         $this->openRepo(app(RepoManager::class));
@@ -156,6 +168,9 @@ class Workspace extends Component
                 $this->tabs[$existingIndex]['repoName'] = $recentRepo->name;
                 $this->tabs[$existingIndex]['currentBranch'] = $recentRepo->branch;
                 $this->tabs[$existingIndex]['isDetached'] = $recentRepo->branch === null;
+                $this->tabs[$existingIndex]['localBranches'] ??= $recentRepo->branch === null ? [] : [$recentRepo->branch];
+                $this->tabs[$existingIndex]['recentBranches'] ??= [];
+                $this->rememberRecentBranch($existingIndex, $recentRepo->branch);
                 $this->activeTabId = $this->tabs[$existingIndex]['id'];
             } else {
                 $tabId = $this->makeTabId($normalizedPath);
@@ -166,6 +181,8 @@ class Workspace extends Component
                     'repoName' => $recentRepo->name,
                     'currentBranch' => $recentRepo->branch,
                     'isDetached' => $recentRepo->branch === null,
+                    'localBranches' => $recentRepo->branch === null ? [] : [$recentRepo->branch],
+                    'recentBranches' => $recentRepo->branch === null ? [] : [$recentRepo->branch],
                 ];
 
                 $this->activeTabId = $tabId;
@@ -224,7 +241,41 @@ class Workspace extends Component
 
     private function makeTabId(string $path): string
     {
-        return 'tab-' . substr(md5($path), 0, 12);
+        return 'tab-'.substr(md5($path), 0, 12);
+    }
+
+    /**
+     * @param  array<mixed>  $branches
+     * @return list<string>
+     */
+    private function normalizeBranchNames(array $branches, ?string $currentBranch): array
+    {
+        $names = array_values(array_unique(array_filter(
+            $branches,
+            fn (mixed $branch): bool => is_string($branch) && trim($branch) !== '',
+        )));
+
+        if ($currentBranch !== null && ! in_array($currentBranch, $names, true)) {
+            array_unshift($names, $currentBranch);
+        }
+
+        return $names;
+    }
+
+    private function rememberRecentBranch(int $tabIndex, ?string $branch): void
+    {
+        if ($branch === null || trim($branch) === '') {
+            return;
+        }
+
+        $recentBranches = $this->tabs[$tabIndex]['recentBranches'] ?? [];
+        $recentBranches = array_values(array_filter(
+            $recentBranches,
+            fn (mixed $recentBranch): bool => is_string($recentBranch) && $recentBranch !== $branch,
+        ));
+        array_unshift($recentBranches, $branch);
+
+        $this->tabs[$tabIndex]['recentBranches'] = array_slice($recentBranches, 0, self::MAX_RECENT_BRANCHES);
     }
 
     private function getActiveTab(): ?array

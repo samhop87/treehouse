@@ -19,11 +19,13 @@ class WorkspaceTest extends TestCase
 
         $component = Livewire::test(Workspace::class, ['path' => '/fake/repo']);
 
-        $this->assertSame('tab-' . substr(md5('/fake/repo'), 0, 12), $component->instance()->activeTabId);
+        $this->assertSame('tab-'.substr(md5('/fake/repo'), 0, 12), $component->instance()->activeTabId);
         $this->assertCount(1, $component->instance()->tabs);
         $this->assertSame('/fake/repo', $component->instance()->tabs[0]['path']);
         $this->assertSame('repo', $component->instance()->tabs[0]['repoName']);
         $this->assertSame('main', $component->instance()->tabs[0]['currentBranch']);
+        $this->assertSame(['main'], $component->instance()->tabs[0]['localBranches']);
+        $this->assertSame(['main'], $component->instance()->tabs[0]['recentBranches']);
     }
 
     public function test_it_deduplicates_existing_tabs_when_reopening_the_same_repo(): void
@@ -37,7 +39,7 @@ class WorkspaceTest extends TestCase
             ->call('openRepoByPath', '/fake/repo');
 
         $this->assertCount(1, $component->instance()->tabs);
-        $this->assertSame('tab-' . substr(md5('/fake/repo'), 0, 12), $component->instance()->activeTabId);
+        $this->assertSame('tab-'.substr(md5('/fake/repo'), 0, 12), $component->instance()->activeTabId);
     }
 
     public function test_it_can_switch_between_open_tabs(): void
@@ -51,11 +53,11 @@ class WorkspaceTest extends TestCase
             ->call('openRepoByPath', '/other/repo');
 
         $this->assertCount(2, $component->instance()->tabs);
-        $this->assertSame('tab-' . substr(md5('/other/repo'), 0, 12), $component->instance()->activeTabId);
+        $this->assertSame('tab-'.substr(md5('/other/repo'), 0, 12), $component->instance()->activeTabId);
 
-        $component->call('activateTab', 'tab-' . substr(md5('/fake/repo'), 0, 12));
+        $component->call('activateTab', 'tab-'.substr(md5('/fake/repo'), 0, 12));
 
-        $this->assertSame('tab-' . substr(md5('/fake/repo'), 0, 12), $component->instance()->activeTabId);
+        $this->assertSame('tab-'.substr(md5('/fake/repo'), 0, 12), $component->instance()->activeTabId);
         $this->assertSame('/fake/repo', $component->instance()->path);
     }
 
@@ -66,8 +68,58 @@ class WorkspaceTest extends TestCase
         ]);
 
         Livewire::test(Workspace::class, ['path' => '/fake/repo'])
-            ->call('closeTab', 'tab-' . substr(md5('/fake/repo'), 0, 12))
+            ->call('closeTab', 'tab-'.substr(md5('/fake/repo'), 0, 12))
             ->assertRedirect('/');
+    }
+
+    public function test_the_top_bar_includes_a_target_action_next_to_the_current_branch(): void
+    {
+        $this->bindRepoManagerMock([
+            ['path' => '/fake/repo', 'repo' => $this->makeRecentRepo('repo', '/fake/repo', 'main')],
+        ]);
+
+        $html = Livewire::test(Workspace::class, ['path' => '/fake/repo'])->html();
+
+        $this->assertStringContainsString('>Target</span>', $html);
+        $this->assertStringContainsString("action: 'target'", $html);
+    }
+
+    public function test_it_populates_the_branch_menu_and_remembers_recently_selected_branches(): void
+    {
+        $this->bindRepoManagerMock([
+            ['path' => '/fake/repo', 'repo' => $this->makeRecentRepo('repo', '/fake/repo', 'main')],
+        ]);
+
+        $component = Livewire::test(Workspace::class, ['path' => '/fake/repo'])
+            ->call(
+                'updateTabContext',
+                'tab-'.substr(md5('/fake/repo'), 0, 12),
+                'repo',
+                'main',
+                '/fake/repo',
+                false,
+                ['main', 'feature/dashboard'],
+            )
+            ->assertSee('feature/dashboard')
+            ->call(
+                'updateTabContext',
+                'tab-'.substr(md5('/fake/repo'), 0, 12),
+                'repo',
+                'feature/dashboard',
+                '/fake/repo',
+                false,
+                ['main', 'feature/dashboard'],
+            );
+
+        $this->assertSame(
+            ['main', 'feature/dashboard'],
+            $component->instance()->tabs[0]['localBranches'],
+        );
+        $this->assertSame(
+            ['feature/dashboard', 'main'],
+            $component->instance()->tabs[0]['recentBranches'],
+        );
+        $this->assertStringContainsString('checkout-branch', $component->html());
     }
 
     private function bindRepoManagerMock(array $responses): void

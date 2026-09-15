@@ -40,6 +40,10 @@
     @workspace-repo-action.window="
         if (! $wire.get('isActive')) return;
         if (! $event.detail || ! $event.detail.action) return;
+        if ($event.detail.action === 'checkout-branch') {
+            if ($event.detail.branch) $wire.checkoutWorkspaceBranch($event.detail.branch);
+            return;
+        }
         $wire.handleShortcut($event.detail.action);
     "
     @mousedown.window="
@@ -47,6 +51,7 @@
             $wire.closeContextMenu();
         }
     "
+    @target-current-branch.window="targetCurrentCommit($event.detail.hash)"
 >
     <aside class="flex w-[17.5rem] shrink-0 flex-col overflow-hidden border-r border-[#343944] bg-[#292d36]">
         <div class="border-b border-[#3b404b] px-3 py-3">
@@ -677,6 +682,9 @@
                                             @if ($diff['oldPath'])
                                                 <span class="text-gray-600">&#8592; {{ $diff['oldPath'] }}</span>
                                             @endif
+                                            @if ($diff['isTruncated'] ?? false)
+                                                <span class="text-amber-500" title="Only the first part of this large diff is shown">Large diff truncated</span>
+                                            @endif
                                             <div class="ml-auto flex items-center gap-2">
                                                 @if ($diff['additions'] > 0)
                                                     <span class="text-teal-400">+{{ $diff['additions'] }}</span>
@@ -746,8 +754,10 @@
                                             wire:click="selectCommit(@js($commit['hash']))"
                                             wire:dblclick="checkoutCommit(@js($commit['hash']))"
                                             x-on:contextmenu.prevent.stop="$wire.openCommitContextMenu('{{ $commit['hash'] }}', $event.clientX, $event.clientY)"
+                                            data-commit-hash="{{ $commit['hash'] }}"
                                             data-history-context-menu-trigger
                                             class="grid h-10 cursor-pointer items-stretch border-b border-[#232833] transition-colors hover:bg-[#202531] {{ $selectedHistoryType === 'commit' && $selectedCommit === $commit['hash'] ? 'bg-violet-900/20' : '' }}"
+                                            :class="{ 'ring-1 ring-inset ring-violet-400 bg-violet-900/30': targetedCommitHash === @js($commit['hash']) }"
                                             :style="'grid-template-columns: 12rem ' + Math.max(graphWidth, graphColumnWidth) + 'px minmax(0,1fr);'"
                                             title="Click to inspect changed files. Double-click to checkout this commit."
                                         >
@@ -769,8 +779,8 @@
                                                                 $graphBranchContextTarget = $this->contextMenuBranchTarget($ref);
                                                             @endphp
                                                             <button
-                                                                wire:click.stop="selectGraphRef(@js($ref))"
-                                                                wire:dblclick.stop="checkoutGraphRef(@js($ref))"
+                                                                x-on:click.stop="handleGraphRefClick(@js($ref))"
+                                                                x-on:dblclick.stop.prevent="handleGraphRefDoubleClick(@js($ref))"
                                                                 x-on:contextmenu.prevent.stop="$wire.openBranchContextMenu(@js($ref), $event.clientX, $event.clientY)"
                                                                 data-history-context-menu-trigger
                                                                 class="shrink-0 whitespace-nowrap rounded border px-2.5 py-1 text-[11px] font-semibold transition-colors cursor-pointer {{ str_contains($ref, 'HEAD') ? 'border-cyan-800/50 bg-cyan-900/40 text-cyan-300 hover:bg-cyan-900/50' : (str_contains($ref, '/') ? 'border-[#2a2a42] bg-[#1a1a2e] text-gray-300 hover:bg-[#202035] hover:text-gray-100' : 'border-violet-800/50 bg-violet-900/40 text-violet-300 hover:bg-violet-900/50') }}"
@@ -1136,10 +1146,18 @@
 
                         <div class="border-t border-[#1e1e32] p-3">
                             <div class="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-gray-500">Commit</div>
+                            <label for="commit-summary" class="mb-1 block text-[10px] uppercase tracking-[0.16em] text-gray-600">Summary</label>
+                            <input
+                                id="commit-summary"
+                                wire:model="commitSummary"
+                                type="text"
+                                class="w-full rounded border border-[#2a2a42] bg-[#11111b] px-3 py-2 text-sm text-gray-200 placeholder:text-gray-600 focus:border-violet-600 focus:outline-none"
+                            />
+                            <label for="commit-description" class="mt-2 mb-1 block text-[10px] uppercase tracking-[0.16em] text-gray-600">Description <span class="normal-case tracking-normal text-gray-700">(optional)</span></label>
                             <textarea
-                                wire:model="commitMessage"
-                                placeholder="Commit message..."
-                                rows="4"
+                                id="commit-description"
+                                wire:model="commitDescription"
+                                rows="3"
                                 class="w-full resize-none rounded border border-[#2a2a42] bg-[#11111b] px-3 py-2 text-sm text-gray-200 placeholder:text-gray-600 focus:border-violet-600 focus:outline-none"
                             ></textarea>
                             <button
@@ -1192,6 +1210,13 @@
 
                 @if (($contextMenuTarget['type'] ?? null) === 'branch')
                     @if (! ($contextMenuTarget['isCurrent'] ?? false))
+                        <button
+                            wire:click="checkoutContextMenuBranchAction"
+                            class="flex w-full items-center justify-between px-3 py-2 text-left text-xs text-gray-300 transition-colors hover:bg-[#1a1a2e] hover:text-violet-300 cursor-pointer"
+                        >
+                            <span>Check out {{ $contextMenuTarget['displayName'] ?? 'branch' }}</span>
+                        </button>
+
                         <button
                             wire:click="rebaseContextMenuBranchAction"
                             class="flex w-full items-center justify-between px-3 py-2 text-left text-xs text-gray-300 transition-colors hover:bg-[#1a1a2e] hover:text-cyan-300 cursor-pointer"

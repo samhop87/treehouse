@@ -6,6 +6,9 @@ document.addEventListener('alpine:init', () => {
 
     Alpine.data('repoView', () => ({
         referenceFilter: '',
+        targetedCommitHash: null,
+        targetHighlightTimer: null,
+        graphRefClickTimer: null,
         referenceSections: {
             local: false,
             remote: false,
@@ -27,6 +30,38 @@ document.addEventListener('alpine:init', () => {
             const query = this.referenceFilter.trim().toLowerCase();
 
             return query === '' || label.toLowerCase().includes(query);
+        },
+
+        targetCurrentCommit(hash) {
+            this.targetedCommitHash = hash;
+
+            this.$nextTick(() => {
+                window.requestAnimationFrame(() => {
+                    const row = this.$root.querySelector(`[data-commit-hash="${hash}"]`);
+                    if (!row) return;
+
+                    row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+                    window.clearTimeout(this.targetHighlightTimer);
+                    this.targetHighlightTimer = window.setTimeout(() => {
+                        this.targetedCommitHash = null;
+                    }, 1800);
+                });
+            });
+        },
+
+        handleGraphRefClick(ref) {
+            window.clearTimeout(this.graphRefClickTimer);
+            this.graphRefClickTimer = window.setTimeout(() => {
+                this.graphRefClickTimer = null;
+                this.$wire.selectGraphRef(ref);
+            }, 250);
+        },
+
+        handleGraphRefDoubleClick(ref) {
+            window.clearTimeout(this.graphRefClickTimer);
+            this.graphRefClickTimer = null;
+            this.$wire.checkoutGraphRef(ref);
         },
     }));
 

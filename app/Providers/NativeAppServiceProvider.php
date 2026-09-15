@@ -2,9 +2,11 @@
 
 namespace App\Providers;
 
+use App\Events\CloneRepoRequested;
+use App\Events\OpenRepoRequested;
+use Native\Desktop\Contracts\ProvidesPhpIni;
 use Native\Desktop\Facades\Menu;
 use Native\Desktop\Facades\Window;
-use Native\Desktop\Contracts\ProvidesPhpIni;
 
 class NativeAppServiceProvider implements ProvidesPhpIni
 {
@@ -19,10 +21,10 @@ class NativeAppServiceProvider implements ProvidesPhpIni
             Menu::label('File')->submenu(
                 Menu::label('Open Repository...')
                     ->hotkey('CmdOrCtrl+O')
-                    ->event(\App\Events\OpenRepoRequested::class),
+                    ->event(OpenRepoRequested::class),
                 Menu::label('Clone Repository...')
                     ->hotkey('CmdOrCtrl+Shift+C')
-                    ->event(\App\Events\CloneRepoRequested::class),
+                    ->event(CloneRepoRequested::class),
             ),
             Menu::edit(),
             Menu::view(),
@@ -44,6 +46,11 @@ class NativeAppServiceProvider implements ProvidesPhpIni
     public function phpIni(): array
     {
         return [
+            // Keep PHP's request body limit above Livewire's application-level
+            // guard. Livewire snapshots can be several megabytes for large
+            // repositories and are sent as JSON request bodies.
+            'post_max_size' => '16M',
+            'max_input_time' => '120',
         ];
     }
 }

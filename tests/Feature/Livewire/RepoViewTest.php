@@ -91,15 +91,30 @@ class RepoViewTest extends TestCase
         );
     }
 
-    public function test_create_commit_invokes_git_with_the_entered_message(): void
+    public function test_targeting_the_current_checkout_reveals_and_dispatches_its_commit_row(): void
+    {
+        $this->bindSelectableGitServiceMock();
+
+        Livewire::test(RepoView::class, [
+            'path' => '/fake/repo',
+            'tabId' => 'tab-1',
+            'isActive' => true,
+        ])
+            ->set('selectedFile', 'README.md')
+            ->call('handleShortcut', 'target')
+            ->assertSet('selectedFile', null)
+            ->assertDispatched('target-current-branch', hash: 'abc123456789');
+    }
+
+    public function test_create_commit_invokes_git_with_summary_and_description(): void
     {
         $git = $this->bindGitServiceMock(loadCount: 2, openCount: 3);
-        $git->shouldReceive('commit')->once()->with('UI commit works')->andReturn(new GitResult(
+        $git->shouldReceive('commit')->once()->with("UI commit works\n\nThis explains the change.")->andReturn(new GitResult(
             success: true,
             output: '',
             error: '',
             exitCode: 0,
-            command: "git commit -m 'UI commit works'",
+            command: "git commit -m 'UI commit works' -m 'This explains the change.'",
         ));
 
         Livewire::test(RepoView::class, [
@@ -107,10 +122,12 @@ class RepoViewTest extends TestCase
             'tabId' => 'tab-1',
             'isActive' => true,
         ])
-            ->set('commitMessage', 'UI commit works')
+            ->set('commitSummary', 'UI commit works')
+            ->set('commitDescription', 'This explains the change.')
             ->call('createCommit')
             ->assertSet('errorMessage', '')
-            ->assertSet('commitMessage', '')
+            ->assertSet('commitSummary', '')
+            ->assertSet('commitDescription', '')
             ->assertDispatched('toast', message: 'Committed: UI commit works', type: 'success');
     }
 
@@ -137,6 +154,67 @@ class RepoViewTest extends TestCase
         $this->assertSame([], $component->get('diffFiles'));
     }
 
+    public function test_selecting_a_branch_from_the_workspace_header_checks_it_out(): void
+    {
+        $git = $this->bindSelectableGitServiceMock();
+        $git->shouldReceive('checkout')->once()->with('feature/test')->andReturn(new GitResult(
+            success: true,
+            output: '',
+            error: '',
+            exitCode: 0,
+            command: 'git checkout feature/test',
+        ));
+
+        Livewire::test(RepoView::class, [
+            'path' => '/fake/repo',
+            'tabId' => 'tab-1',
+            'isActive' => true,
+        ])
+            ->call('checkoutWorkspaceBranch', 'feature/test')
+            ->assertSet('errorMessage', '')
+            ->assertDispatched('toast', message: "Switched to 'feature/test'", type: 'success');
+    }
+
+    public function test_branch_context_menu_offers_checkout_and_switches_to_the_branch(): void
+    {
+        $git = $this->bindSelectableGitServiceMock();
+        $git->shouldReceive('checkout')->once()->with('feature/test')->andReturn(new GitResult(
+            success: true,
+            output: '',
+            error: '',
+            exitCode: 0,
+            command: 'git checkout feature/test',
+        ));
+
+        Livewire::test(RepoView::class, [
+            'path' => '/fake/repo',
+            'tabId' => 'tab-1',
+            'isActive' => true,
+        ])
+            ->call('openBranchContextMenu', 'feature/test', 40, 60)
+            ->assertSee('Check out feature/test')
+            ->assertSeeHtml('wire:click="checkoutContextMenuBranchAction"')
+            ->call('checkoutContextMenuBranchAction')
+            ->assertSet('showContextMenu', false)
+            ->assertSet('errorMessage', '')
+            ->assertDispatched('toast', message: "Switched to 'feature/test'", type: 'success');
+    }
+
+    public function test_graph_branch_badge_defers_selection_and_handles_double_click_client_side(): void
+    {
+        $this->bindSelectableGitServiceMock();
+
+        $html = Livewire::test(RepoView::class, [
+            'path' => '/fake/repo',
+            'tabId' => 'tab-1',
+            'isActive' => true,
+        ])->html();
+
+        $this->assertStringContainsString('x-on:click.stop="handleGraphRefClick(', $html);
+        $this->assertStringContainsString('x-on:dblclick.stop.prevent="handleGraphRefDoubleClick(', $html);
+        $this->assertStringNotContainsString('wire:dblclick.stop="checkoutGraphRef(', $html);
+    }
+
     public function test_selecting_a_history_file_populates_the_centre_diff(): void
     {
         $historyDiff = $this->makeDiffFile('README.md');
@@ -156,9 +234,51 @@ class RepoViewTest extends TestCase
             ->call('selectHistoryFile', 'README.md');
 
         $this->assertSame('commit', $component->get('selectedHistoryType'));
+        $this->assertArrayNotHasKey('hunks', $component->get('selectedHistoryDiffs')[0]);
         $this->assertSame('README.md', $component->get('selectedFile'));
         $this->assertCount(1, $component->get('diffFiles'));
+        $this->assertArrayHasKey('hunks', $component->get('diffFiles')[0]);
         $this->assertSame('README.md', $component->get('diffFiles')[0]['path']);
+    }
+
+    public function test_large_history_diff_is_bounded_before_it_enters_the_livewire_snapshot(): void
+    {
+        $largeDiff = new DiffFile(
+            path: 'large.txt',
+            status: 'modified',
+            oldPath: null,
+            isBinary: false,
+            hunks: [
+                new DiffHunk(
+                    oldStart: 1,
+                    oldCount: 2101,
+                    newStart: 1,
+                    newCount: 2101,
+                    header: '@@ -1,2101 +1,2101 @@',
+                    lines: array_map(
+                        fn (int $line) => new DiffLine('context', "line {$line}", $line, $line),
+                        range(1, 2101),
+                    ),
+                ),
+            ],
+        );
+
+        $this->bindSelectableGitServiceMock(commitDiffs: [$largeDiff]);
+
+        $component = Livewire::test(RepoView::class, [
+            'path' => '/fake/repo',
+            'tabId' => 'tab-1',
+            'isActive' => true,
+        ]);
+
+        $component
+            ->call('selectCommit', 'abc123456789')
+            ->call('selectHistoryFile', 'large.txt');
+
+        $lines = $component->get('diffFiles')[0]['hunks'][0]['lines'];
+
+        $this->assertCount(500, $lines);
+        $this->assertTrue($component->get('diffFiles')[0]['isTruncated']);
     }
 
     public function test_selecting_a_working_tree_file_clears_history_selection(): void
@@ -292,7 +412,7 @@ class RepoViewTest extends TestCase
         array $commitDiffs = [],
         array $refDiffs = [],
         array $fileDiffs = [],
-    ): void {
+    ): MockInterface {
         $state = new RepoState(
             headHash: 'abc1234',
             branch: 'main',
@@ -325,6 +445,15 @@ class RepoViewTest extends TestCase
                 behind: 0,
             ),
             new Branch(
+                name: 'feature/test',
+                hash: 'def5678',
+                isCurrent: false,
+                isRemote: false,
+                upstream: 'origin/feature/test',
+                ahead: 0,
+                behind: 0,
+            ),
+            new Branch(
                 name: 'origin/feature/test',
                 hash: 'def5678',
                 isCurrent: false,
@@ -348,6 +477,8 @@ class RepoViewTest extends TestCase
         $git->shouldReceive('getFileDiff')->with('resources/js/app.js', false)->andReturn($fileDiffs);
 
         $this->app->instance(GitService::class, $git);
+
+        return $git;
     }
 
     private function makeDiffFile(string $path): DiffFile

@@ -1,4 +1,4 @@
-<div class="flex h-full flex-col overflow-hidden" x-data="{}">
+<div class="flex h-full flex-col overflow-hidden" x-data="{ branchDropdownOpen: false }">
     @if ($errorMessage)
         <div class="border-b border-red-800 bg-red-900/30 px-4 py-2 text-sm text-red-400">
             {{ $errorMessage }}
@@ -6,6 +6,12 @@
     @endif
 
     @if ($activeTab)
+        @php
+            $localBranches = $activeTab['localBranches'] ?? [];
+            $recentBranches = array_values(array_intersect($activeTab['recentBranches'] ?? [], $localBranches));
+            $otherBranches = array_values(array_diff($localBranches, $recentBranches));
+        @endphp
+
         <div class="border-b border-[#3a3e4a] bg-[#31353f] px-2 py-1">
             <div class="flex items-center gap-0.5 overflow-x-auto">
                 @foreach ($tabs as $tab)
@@ -62,15 +68,108 @@
                         </div>
                     </div>
 
-                    <div class="min-w-0">
+                    <div class="relative min-w-0">
                         <div class="text-[10px] uppercase tracking-[0.18em] text-gray-500">Branch</div>
                         <div class="mt-1 flex items-center gap-2">
-                            <div class="truncate text-[1.05rem] font-semibold leading-none text-gray-100">
-                                {{ $activeTab['isDetached'] ? 'Detached HEAD' : ($activeTab['currentBranch'] ?? 'Unknown') }}
+                            <button
+                                type="button"
+                                x-on:click="branchDropdownOpen = ! branchDropdownOpen"
+                                x-on:keydown.escape.window="branchDropdownOpen = false"
+                                x-bind:aria-expanded="branchDropdownOpen"
+                                aria-haspopup="menu"
+                                class="flex max-w-[18rem] items-center gap-2 rounded px-1 py-0.5 -ml-1 transition-colors hover:bg-[#2c3039] cursor-pointer"
+                                title="Switch branch"
+                            >
+                                <span class="truncate text-[1.05rem] font-semibold leading-none text-gray-100">
+                                    {{ $activeTab['isDetached'] ? 'Detached HEAD' : ($activeTab['currentBranch'] ?? 'Unknown') }}
+                                </span>
+                                <svg
+                                    class="h-3.5 w-3.5 shrink-0 text-gray-500 transition-transform"
+                                    x-bind:class="branchDropdownOpen ? 'rotate-180' : ''"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="2"
+                                    viewBox="0 0 24 24"
+                                >
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/>
+                                </svg>
+                            </button>
+
+                            <button
+                                type="button"
+                                x-on:click="window.dispatchEvent(new CustomEvent('workspace-repo-action', { detail: { action: 'target' } }))"
+                                class="flex shrink-0 items-center gap-1 rounded-md border border-[#4a4f5f] bg-[#2c3038] px-2 py-1 text-[10px] font-medium text-gray-300 transition-colors hover:bg-[#404553] hover:text-gray-100 cursor-pointer"
+                                title="Show the current checkout in the graph"
+                            >
+                                <svg class="h-3 w-3" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+                                    <circle cx="12" cy="12" r="7"/>
+                                    <circle cx="12" cy="12" r="2"/>
+                                    <path stroke-linecap="round" d="M12 2v3m0 14v3M2 12h3m14 0h3"/>
+                                </svg>
+                                <span>Target</span>
+                            </button>
+                        </div>
+
+                        <div
+                            x-show="branchDropdownOpen"
+                            x-on:click.outside="branchDropdownOpen = false"
+                            x-transition:enter="transition ease-out duration-100"
+                            x-transition:enter-start="opacity-0 -translate-y-1"
+                            x-transition:enter-end="opacity-100 translate-y-0"
+                            x-transition:leave="transition ease-in duration-75"
+                            x-transition:leave-start="opacity-100 translate-y-0"
+                            x-transition:leave-end="opacity-0 -translate-y-1"
+                            x-cloak
+                            role="menu"
+                            class="absolute left-0 top-full z-50 mt-2 w-72 overflow-hidden rounded-lg border border-[#4a4f5f] bg-[#252932] shadow-2xl"
+                        >
+                            <div class="max-h-80 overflow-y-auto py-1.5">
+                                @if ($recentBranches !== [])
+                                    <div class="px-3 pb-1 pt-1 text-[9px] font-semibold uppercase tracking-[0.18em] text-gray-600">Recent</div>
+                                    @foreach ($recentBranches as $branch)
+                                        <button
+                                            type="button"
+                                            @disabled($branch === $activeTab['currentBranch'])
+                                            x-on:click="
+                                                branchDropdownOpen = false;
+                                                window.dispatchEvent(new CustomEvent('workspace-repo-action', { detail: { action: 'checkout-branch', branch: @js($branch) } }));
+                                            "
+                                            role="menuitem"
+                                            class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors {{ $branch === $activeTab['currentBranch'] ? 'text-gray-200' : 'text-gray-400 hover:bg-[#303541] hover:text-gray-100 cursor-pointer' }}"
+                                            title="Switch to {{ $branch }}"
+                                        >
+                                            <span class="h-2 w-2 shrink-0 rounded-full {{ $branch === $activeTab['currentBranch'] ? 'bg-violet-500' : 'bg-transparent' }}"></span>
+                                            <span class="min-w-0 flex-1 truncate">{{ $branch }}</span>
+                                            @if ($branch === $activeTab['currentBranch'])
+                                                <span class="text-[9px] uppercase tracking-[0.14em] text-violet-400">Current</span>
+                                            @endif
+                                        </button>
+                                    @endforeach
+                                @endif
+
+                                @if ($otherBranches !== [])
+                                    <div class="{{ $recentBranches !== [] ? 'mt-1 border-t border-[#3a3e4a]' : '' }} px-3 pb-1 pt-2 text-[9px] font-semibold uppercase tracking-[0.18em] text-gray-600">Branches</div>
+                                    @foreach ($otherBranches as $branch)
+                                        <button
+                                            type="button"
+                                            x-on:click="
+                                                branchDropdownOpen = false;
+                                                window.dispatchEvent(new CustomEvent('workspace-repo-action', { detail: { action: 'checkout-branch', branch: @js($branch) } }));
+                                            "
+                                            role="menuitem"
+                                            class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-gray-400 transition-colors hover:bg-[#303541] hover:text-gray-100 cursor-pointer"
+                                            title="Switch to {{ $branch }}"
+                                        >
+                                            <span class="h-2 w-2 shrink-0 rounded-full bg-transparent"></span>
+                                            <span class="min-w-0 flex-1 truncate">{{ $branch }}</span>
+                                        </button>
+                                    @endforeach
+                                @endif
+
+                                @if ($localBranches === [])
+                                    <div class="px-3 py-3 text-xs italic text-gray-600">No local branches available</div>
+                                @endif
                             </div>
-                            <svg class="h-3.5 w-3.5 shrink-0 text-gray-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/>
-                            </svg>
                         </div>
                     </div>
                 </div>

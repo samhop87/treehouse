@@ -9,6 +9,7 @@ use App\DTOs\RepoState;
 use App\DTOs\StashEntry;
 use App\DTOs\Tag;
 use App\Services\Git\GitService;
+use Illuminate\Support\Str;
 use Livewire\Attributes\On;
 use Livewire\Attributes\Reactive;
 use Livewire\Component;
@@ -18,6 +19,34 @@ use Native\Desktop\Facades\ChildProcess;
 
 class RepoView extends Component
 {
+    private const HISTORY_LIMIT = 200;
+
+    private const MAX_BRANCHES_PER_KIND = 500;
+
+    private const MAX_TAGS = 500;
+
+    private const MAX_STASHES = 200;
+
+    private const MAX_STATUS_FILES = 500;
+
+    private const MAX_COMMIT_REFS = 20;
+
+    private const MAX_COMMIT_MESSAGE_LENGTH = 4000;
+
+    private const MAX_TAG_MESSAGE_LENGTH = 4000;
+
+    private const MAX_STASH_MESSAGE_LENGTH = 4000;
+
+    private const MAX_DIFF_FILES = 100;
+
+    private const MAX_DIFF_HUNKS = 100;
+
+    private const MAX_DIFF_LINES_TOTAL = 2000;
+
+    private const MAX_DIFF_LINES_PER_HUNK = 500;
+
+    private const MAX_DIFF_LINE_LENGTH = 1000;
+
     // ─── STATE ───────────────────────────────────────────────────────────
 
     public string $path = '';
@@ -35,7 +64,9 @@ class RepoView extends Component
 
     /** Local and remote branches */
     public array $localBranches = [];
+
     public array $remoteBranches = [];
+
     public ?string $currentBranch = null;
 
     /** Tags (first-class!) */
@@ -46,8 +77,11 @@ class RepoView extends Component
 
     /** Staged/unstaged/untracked file lists */
     public array $stagedFiles = [];
+
     public array $unstagedFiles = [];
+
     public array $untrackedFiles = [];
+
     public array $conflictedFiles = [];
 
     /** In-progress Git operation that owns any recovery controls. */
@@ -55,6 +89,7 @@ class RepoView extends Component
 
     /** Currently selected file for diff view */
     public ?string $selectedFile = null;
+
     public bool $selectedFileStaged = false;
 
     /** Diff data for the selected file */
@@ -74,13 +109,18 @@ class RepoView extends Component
 
     /** Currently selected branch for history inspection */
     public ?string $selectedBranch = null;
+
     public ?array $selectedBranchData = null;
 
     /** Repo metadata */
     public string $repoName = '';
+
     public ?string $upstream = null;
+
     public int $ahead = 0;
+
     public int $behind = 0;
+
     public bool $isDetached = false;
 
     /** Error state */
@@ -91,8 +131,11 @@ class RepoView extends Component
 
     /** Context menu state */
     public bool $showContextMenu = false;
+
     public int $contextMenuX = 12;
+
     public int $contextMenuY = 12;
+
     public ?array $contextMenuTarget = null;
 
     // ─── LIFECYCLE ───────────────────────────────────────────────────────
@@ -135,7 +178,7 @@ class RepoView extends Component
             }
 
             // Load commits
-            $commits = $git->getLog(limit: 200, all: true);
+            $commits = $git->getLog(limit: self::HISTORY_LIMIT, all: true);
             $this->commits = $this->serializeCommits($commits);
 
             // Load branches
@@ -228,6 +271,9 @@ class RepoView extends Component
             }
         }
 
+        $localBranches = $this->limitBranches($localBranches);
+        $remoteBranches = $this->limitBranches($remoteBranches);
+
         $remoteByLocalName = collect($remoteBranches)
             ->mapWithKeys(fn (array $branch) => [$branch['localName'] => $branch['name']])
             ->all();
@@ -250,6 +296,31 @@ class RepoView extends Component
                 'hasLocalPair' => in_array($branch['localName'], $localNames, true),
             ]);
         }, $remoteBranches);
+    }
+
+    /**
+     * Keep branch snapshots bounded while retaining the checked-out branch.
+     * Large repositories can have thousands of remote-tracking refs.
+     *
+     * @param  list<array<string, mixed>>  $branches
+     * @return list<array<string, mixed>>
+     */
+    private function limitBranches(array $branches): array
+    {
+        $current = array_values(array_filter(
+            $branches,
+            fn (array $branch): bool => $branch['isCurrent'] === true,
+        ));
+        $remaining = array_values(array_filter(
+            $branches,
+            fn (array $branch): bool => $branch['isCurrent'] !== true,
+        ));
+
+        return array_slice(
+            array_merge($current, $remaining),
+            0,
+            self::MAX_BRANCHES_PER_KIND,
+        );
     }
 
     // ─── FILE SELECTION & DIFF ───────────────────────────────────────────
@@ -292,6 +363,32 @@ class RepoView extends Component
         $this->selectedCommitData = null;
         $this->selectedBranch = null;
         $this->selectedBranchData = null;
+    }
+
+    /**
+     * Reveal and focus the row for the currently checked-out commit.
+     */
+    public function targetCurrentCheckout(): void
+    {
+        $headHash = (string) ($this->status['headHash'] ?? '');
+        $commitHash = collect($this->commits)
+            ->pluck('hash')
+            ->first(fn (string $hash): bool => $hash === $headHash
+                || ($headHash !== '' && str_starts_with($hash, $headHash))
+                || ($hash !== '' && str_starts_with($headHash, $hash)));
+
+        if ($commitHash === null) {
+            $this->dispatch(
+                'toast',
+                message: 'The current checkout is outside the loaded history.',
+                type: 'error',
+            );
+
+            return;
+        }
+
+        $this->clearFileSelection();
+        $this->dispatch('target-current-branch', hash: $commitHash);
     }
 
     /**
@@ -347,10 +444,7 @@ class RepoView extends Component
 
         $this->selectedFile = $path;
         $this->selectedFileStaged = false;
-        $this->diffFiles = array_values(array_filter(
-            $this->selectedHistoryDiffs,
-            fn (array $diff) => $diff['path'] === $path
-        ));
+        $this->loadSelectedHistoryFileDiff($path);
     }
 
     /**
@@ -446,6 +540,21 @@ class RepoView extends Component
         }
     }
 
+    public function checkoutContextMenuBranchAction(): void
+    {
+        if (($this->contextMenuTarget['type'] ?? null) !== 'branch') {
+            return;
+        }
+
+        $name = $this->contextMenuTarget['ref'] ?? null;
+        $isCurrent = (bool) ($this->contextMenuTarget['isCurrent'] ?? false);
+        $this->closeContextMenu();
+
+        if (! $isCurrent && is_string($name) && $name !== '') {
+            $this->checkoutGraphRef($name);
+        }
+    }
+
     public function deleteContextMenuBranchAction(): void
     {
         if (($this->contextMenuTarget['type'] ?? null) !== 'branch') {
@@ -518,6 +627,7 @@ class RepoView extends Component
 
         if ($branch['isRemote']) {
             $this->checkoutRemoteBranch($branchName);
+
             return;
         }
 
@@ -544,7 +654,7 @@ class RepoView extends Component
             $git->open($this->path);
 
             $diffs = $git->getCommitDiff($hash);
-            $this->selectedHistoryDiffs = $this->serializeDiffFiles($diffs);
+            $this->selectedHistoryDiffs = $this->serializeDiffFiles($diffs, includeHunks: false);
         } catch (\RuntimeException $e) {
             $this->selectedHistoryDiffs = [];
         }
@@ -557,9 +667,41 @@ class RepoView extends Component
             $git->open($this->path);
 
             $diffs = $git->getRefComparisonDiff($name);
-            $this->selectedHistoryDiffs = $this->serializeDiffFiles($diffs);
+            $this->selectedHistoryDiffs = $this->serializeDiffFiles($diffs, includeHunks: false);
         } catch (\RuntimeException $e) {
             $this->selectedHistoryDiffs = [];
+        }
+    }
+
+    /**
+     * Load only the selected history file's hunks. The file list above keeps
+     * metadata only, so a large commit does not put its complete diff into the
+     * Livewire snapshot.
+     */
+    private function loadSelectedHistoryFileDiff(string $path): void
+    {
+        if ($this->selectedHistoryType === null) {
+            $this->diffFiles = [];
+
+            return;
+        }
+
+        try {
+            $git = app(GitService::class);
+            $git->open($this->path);
+
+            $diffs = $this->selectedHistoryType === 'commit'
+                ? $git->getCommitDiff((string) $this->selectedCommit)
+                : $git->getRefComparisonDiff((string) $this->selectedBranch);
+
+            $diffs = array_values(array_filter(
+                $diffs,
+                fn (DiffFile $diff) => $diff->path === $path,
+            ));
+
+            $this->diffFiles = $this->serializeDiffFiles($diffs);
+        } catch (\RuntimeException $e) {
+            $this->diffFiles = [];
         }
     }
 
@@ -613,25 +755,32 @@ class RepoView extends Component
 
     // ─── COMMIT ──────────────────────────────────────────────────────────
 
-    public string $commitMessage = '';
+    public string $commitSummary = '';
+
+    public string $commitDescription = '';
 
     /**
-     * Create a commit with the current message.
+     * Create a commit from the current summary and description.
      */
     public function createCommit(): void
     {
-        if (trim($this->commitMessage) === '') {
+        $summary = trim($this->commitSummary);
+        $description = trim($this->commitDescription);
+
+        if ($summary === '') {
             $this->errorMessage = 'Commit message cannot be empty.';
+
             return;
         }
 
-        $msg = $this->commitMessage;
+        $msg = $summary.($description === '' ? '' : "\n\n{$description}");
         $this->runGitAction(function (GitService $git) use ($msg) {
             $git->commit($msg);
-        }, 'Committed: ' . \Illuminate\Support\Str::limit(trim($msg), 50));
+        }, 'Committed: '.Str::limit($summary, 50));
 
         if ($this->errorMessage === '') {
-            $this->commitMessage = '';
+            $this->commitSummary = '';
+            $this->commitDescription = '';
         }
     }
 
@@ -639,15 +788,19 @@ class RepoView extends Component
 
     /** State for branch creation UI */
     public bool $showCreateBranch = false;
+
     public string $newBranchName = '';
+
     public string $newBranchStartPoint = '';
 
     /** State for merge UI */
     public bool $showMergeConfirm = false;
+
     public string $mergeBranchName = '';
 
     /** State for rebase UI */
     public bool $showRebaseConfirm = false;
+
     public string $rebaseTargetName = '';
 
     /**
@@ -655,6 +808,20 @@ class RepoView extends Component
      */
     public function checkoutBranch(string $name): void
     {
+        $this->checkoutLocalBranch($name);
+    }
+
+    /**
+     * Checkout a local branch selected from the workspace header.
+     */
+    public function checkoutWorkspaceBranch(string $name): void
+    {
+        $branch = $this->findBranchByName($name);
+
+        if (! $this->isActive || $branch === null || $branch['isRemote'] || $branch['isCurrent']) {
+            return;
+        }
+
         $this->checkoutLocalBranch($name);
     }
 
@@ -721,6 +888,7 @@ class RepoView extends Component
         $name = trim($this->newBranchName);
         if ($name === '') {
             $this->errorMessage = 'Branch name cannot be empty.';
+
             return;
         }
 
@@ -873,11 +1041,13 @@ class RepoView extends Component
 
         if ($target === '' || $target === $this->currentBranch) {
             $this->errorMessage = 'Choose another branch to rebase onto.';
+
             return;
         }
 
         if (! ($this->status['isClean'] ?? false)) {
             $this->errorMessage = 'Commit or stash your changes before rebasing.';
+
             return;
         }
 
@@ -892,6 +1062,7 @@ class RepoView extends Component
     {
         if ($this->currentOperation === null || $this->currentOperation === 'conflict') {
             $this->errorMessage = 'Unable to determine which Git operation to continue.';
+
             return;
         }
 
@@ -907,6 +1078,7 @@ class RepoView extends Component
     {
         if ($this->currentOperation === null || $this->currentOperation === 'conflict') {
             $this->errorMessage = 'Unable to determine which Git operation to abort.';
+
             return;
         }
 
@@ -934,9 +1106,13 @@ class RepoView extends Component
 
     /** State for tag creation UI */
     public bool $showCreateTag = false;
+
     public string $newTagName = '';
+
     public string $newTagRef = '';
+
     public bool $newTagAnnotated = false;
+
     public string $newTagMessage = '';
 
     /**
@@ -987,11 +1163,13 @@ class RepoView extends Component
         $name = trim($this->newTagName);
         if ($name === '') {
             $this->errorMessage = 'Tag name cannot be empty.';
+
             return;
         }
 
         if ($this->newTagAnnotated && trim($this->newTagMessage) === '') {
             $this->errorMessage = 'Annotated tags require a message.';
+
             return;
         }
 
@@ -1038,6 +1216,7 @@ class RepoView extends Component
 
     /** State for stash creation UI */
     public bool $showCreateStash = false;
+
     public string $newStashMessage = '';
 
     /**
@@ -1255,7 +1434,7 @@ class RepoView extends Component
     /**
      * Handle ChildProcess exit for remote operations.
      */
-    #[On('native:' . ProcessExited::class)]
+    #[On('native:'.ProcessExited::class)]
     public function onRemoteProcessExited(string $alias, int $code): void
     {
         if ($alias !== $this->remoteOperationAlias() || $this->remoteOperation === null) {
@@ -1281,7 +1460,7 @@ class RepoView extends Component
                 'fetch' => 'Fetched from remote',
                 'pull' => 'Pulled from remote',
                 'push' => 'Pushed to remote',
-                default => ucfirst($op) . ' complete',
+                default => ucfirst($op).' complete',
             };
             $this->dispatch('toast', message: $label, type: 'success');
         }
@@ -1290,7 +1469,7 @@ class RepoView extends Component
     /**
      * Handle stderr progress from ChildProcess (git sends progress to stderr).
      */
-    #[On('native:' . ErrorReceived::class)]
+    #[On('native:'.ErrorReceived::class)]
     public function onRemoteProgress(string $alias, mixed $data = null): void
     {
         if ($alias !== $this->remoteOperationAlias() || $this->remoteOperation === null) {
@@ -1326,6 +1505,7 @@ class RepoView extends Component
 
         match ($action) {
             'refresh' => $this->refresh(),
+            'target' => $this->targetCurrentCheckout(),
             'push' => $this->pushRemote(),
             'fetch' => $this->fetchRemote(),
             'pull' => $this->pullRemote(),
@@ -1395,7 +1575,7 @@ class RepoView extends Component
 
     private function remoteOperationAlias(): string
     {
-        return 'git-remote-op-' . $this->tabId;
+        return 'git-remote-op-'.$this->tabId;
     }
 
     private function localBranchNameFromRemote(string $name): string
@@ -1463,13 +1643,11 @@ class RepoView extends Component
     {
         if ($this->selectedFile === null) {
             $this->diffFiles = [];
+
             return;
         }
 
-        $this->diffFiles = array_values(array_filter(
-            $this->selectedHistoryDiffs,
-            fn (array $diff) => $diff['path'] === $this->selectedFile
-        ));
+        $this->loadSelectedHistoryFileDiff($this->selectedFile);
     }
 
     private function syncWorkspaceTabContext(): void
@@ -1481,6 +1659,7 @@ class RepoView extends Component
             currentBranch: $this->currentBranch,
             path: $this->path,
             isDetached: $this->isDetached,
+            localBranches: array_column($this->localBranches, 'name'),
         );
     }
 
@@ -1500,33 +1679,35 @@ class RepoView extends Component
             'origPath' => $f->origPath,
             'label' => $f->label(),
             'isRenamed' => $f->isRenamed(),
-        ], $files);
+        ], array_slice($files, 0, self::MAX_STATUS_FILES));
     }
 
     /**
-     * @param list<Commit> $commits
+     * @param  list<Commit>  $commits
      */
     private function serializeCommits(array $commits): array
     {
-        return array_map(fn (Commit $c) => [
-            'hash' => $c->hash,
-            'shortHash' => $c->shortHash,
-            'parents' => $c->parents,
-            'author' => $c->author,
-            'email' => $c->email,
-            'date' => $c->date->toIso8601String(),
-            'dateHuman' => $c->date->diffForHumans(),
-            'message' => $c->message,
-            'refs' => $c->refs,
-            'isMerge' => $c->isMerge(),
-            'avatarUrl' => $this->avatarUrlForEmail($c->email),
-            'avatarInitials' => $this->initialsForAuthor($c->author),
-            'avatarHue' => $this->avatarHueForEmail($c->email),
-        ], $commits);
+        return array_map(function (Commit $c): array {
+            return [
+                'hash' => $c->hash,
+                'shortHash' => $c->shortHash,
+                'parents' => $c->parents,
+                'author' => $c->author,
+                'email' => $c->email,
+                'date' => $c->date->toIso8601String(),
+                'dateHuman' => $c->date->diffForHumans(),
+                'message' => mb_substr($c->message, 0, self::MAX_COMMIT_MESSAGE_LENGTH),
+                'refs' => array_slice($c->refs, 0, self::MAX_COMMIT_REFS),
+                'isMerge' => $c->isMerge(),
+                'avatarUrl' => $this->avatarUrlForEmail($c->email),
+                'avatarInitials' => $this->initialsForAuthor($c->author),
+                'avatarHue' => $this->avatarHueForEmail($c->email),
+            ];
+        }, array_slice($commits, 0, self::HISTORY_LIMIT));
     }
 
     /**
-     * @param list<Tag> $tags
+     * @param  list<Tag>  $tags
      */
     private function serializeTags(array $tags): array
     {
@@ -1536,49 +1717,95 @@ class RepoView extends Component
             'commitHash' => $t->commitHash(),
             'isAnnotated' => $t->isAnnotated,
             'date' => $t->date?->toIso8601String(),
-            'message' => $t->message,
-        ], $tags);
+            'message' => $t->message !== null ? mb_substr($t->message, 0, self::MAX_TAG_MESSAGE_LENGTH) : null,
+        ], array_slice($tags, 0, self::MAX_TAGS));
     }
 
     /**
-     * @param list<StashEntry> $stashes
+     * @param  list<StashEntry>  $stashes
      */
     private function serializeStashes(array $stashes): array
     {
         return array_map(fn (StashEntry $s) => [
             'ref' => $s->ref,
             'hash' => $s->hash,
-            'message' => $s->message,
+            'message' => mb_substr($s->message, 0, self::MAX_STASH_MESSAGE_LENGTH),
             'index' => $s->index(),
-        ], $stashes);
+        ], array_slice($stashes, 0, self::MAX_STASHES));
     }
 
     /**
-     * @param list<DiffFile> $diffs
+     * @param  list<DiffFile>  $diffs
      */
-    private function serializeDiffFiles(array $diffs): array
+    private function serializeDiffFiles(array $diffs, bool $includeHunks = true): array
     {
-        return array_map(fn (DiffFile $d) => [
-            'path' => $d->path,
-            'status' => $d->status,
-            'oldPath' => $d->oldPath,
-            'isBinary' => $d->isBinary,
-            'additions' => $d->additions(),
-            'deletions' => $d->deletions(),
-            'hunks' => array_map(fn ($h) => [
-                'header' => $h->header,
-                'oldStart' => $h->oldStart,
-                'oldCount' => $h->oldCount,
-                'newStart' => $h->newStart,
-                'newCount' => $h->newCount,
-                'lines' => array_map(fn ($l) => [
-                    'type' => $l->type,
-                    'content' => $l->content,
-                    'oldLine' => $l->oldLine,
-                    'newLine' => $l->newLine,
-                ], $h->lines),
-            ], $d->hunks),
-        ], $diffs);
+        $serializedDiffs = [];
+        $totalLines = 0;
+
+        foreach (array_slice($diffs, 0, self::MAX_DIFF_FILES) as $d) {
+            $serialized = [
+                'path' => $d->path,
+                'status' => $d->status,
+                'oldPath' => $d->oldPath,
+                'isBinary' => $d->isBinary,
+                'additions' => $d->additions(),
+                'deletions' => $d->deletions(),
+            ];
+
+            if (! $includeHunks) {
+                $serializedDiffs[] = $serialized;
+
+                continue;
+            }
+
+            $hunks = array_slice($d->hunks, 0, self::MAX_DIFF_HUNKS);
+            $truncated = count($d->hunks) > count($hunks);
+            $serialized['hunks'] = [];
+
+            foreach ($hunks as $h) {
+                $lines = [];
+
+                foreach (array_slice($h->lines, 0, self::MAX_DIFF_LINES_PER_HUNK) as $l) {
+                    if ($totalLines >= self::MAX_DIFF_LINES_TOTAL) {
+                        $truncated = true;
+                        break 2;
+                    }
+
+                    $lines[] = [
+                        'type' => $l->type,
+                        'content' => mb_substr($l->content, 0, self::MAX_DIFF_LINE_LENGTH),
+                        'oldLine' => $l->oldLine,
+                        'newLine' => $l->newLine,
+                    ];
+                    $totalLines++;
+                }
+
+                if (count($h->lines) > count($lines)) {
+                    $truncated = true;
+                }
+
+                $serialized['hunks'][] = [
+                    'header' => $h->header,
+                    'oldStart' => $h->oldStart,
+                    'oldCount' => $h->oldCount,
+                    'newStart' => $h->newStart,
+                    'newCount' => $h->newCount,
+                    'lines' => $lines,
+                ];
+            }
+
+            if ($truncated) {
+                $serialized['isTruncated'] = true;
+            }
+
+            $serializedDiffs[] = $serialized;
+
+            if ($totalLines >= self::MAX_DIFF_LINES_TOTAL) {
+                break;
+            }
+        }
+
+        return $serializedDiffs;
     }
 
     // ─── RENDER ──────────────────────────────────────────────────────────
@@ -1590,7 +1817,7 @@ class RepoView extends Component
 
     private function avatarUrlForEmail(string $email): string
     {
-        return 'https://www.gravatar.com/avatar/' . md5(strtolower(trim($email))) . '?s=64&d=mp';
+        return 'https://www.gravatar.com/avatar/'.md5(strtolower(trim($email))).'?s=64&d=mp';
     }
 
     private function initialsForAuthor(string $author): string
