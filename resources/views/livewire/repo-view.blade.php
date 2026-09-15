@@ -19,7 +19,7 @@
         }
         if ($event.metaKey && $event.shiftKey && $event.key === 'p') {
             $event.preventDefault();
-            $wire.handleShortcut('push');
+            $wire.pushRemote();
         }
         if ($event.metaKey && $event.shiftKey && $event.key === 'f') {
             $event.preventDefault();
@@ -27,11 +27,11 @@
         }
         if ($event.metaKey && $event.shiftKey && $event.key === 'l') {
             $event.preventDefault();
-            $wire.handleShortcut('pull');
+            $wire.pullRemote();
         }
         if ($event.metaKey && $event.key === 'Enter') {
             $event.preventDefault();
-            $wire.handleShortcut('commit');
+            $wire.createCommit();
         }
         if ($event.key === 'Escape') {
             $wire.handleShortcut('escape');
@@ -42,6 +42,14 @@
         if (! $event.detail || ! $event.detail.action) return;
         if ($event.detail.action === 'checkout-branch') {
             if ($event.detail.branch) $wire.checkoutWorkspaceBranch($event.detail.branch);
+            return;
+        }
+        if ($event.detail.action === 'pull') {
+            $wire.pullRemote();
+            return;
+        }
+        if ($event.detail.action === 'push') {
+            $wire.pushRemote();
             return;
         }
         $wire.handleShortcut($event.detail.action);
@@ -815,7 +823,10 @@
 
                                             <div class="flex min-w-0 flex-col justify-center {{ $commitHasRefs ? 'px-3 py-1.5' : 'px-2.5 py-1' }}">
                                                 <div class="flex min-w-0 items-center gap-2">
-                                                    <div class="truncate {{ $commitHasRefs ? 'text-[0.95rem]' : 'text-[0.82rem]' }} text-gray-200">{{ $commit['message'] }}</div>
+                                                    <div class="truncate {{ $commit['description'] !== '' ? 'max-w-[55%] shrink-0' : 'min-w-0' }} {{ $commitHasRefs ? 'text-[0.95rem]' : 'text-[0.82rem]' }} text-gray-200">{{ $commit['message'] }}</div>
+                                                    @if ($commit['description'] !== '')
+                                                        <div data-commit-description-preview class="min-w-0 flex-1 truncate {{ $commitHasRefs ? 'text-[11px]' : 'text-[10px]' }} text-gray-500">{{ $commit['description'] }}</div>
+                                                    @endif
                                                     @if ($commit['isMerge'])
                                                         <span class="rounded border border-[#2a2a42] px-1.5 py-0.5 uppercase tracking-[0.16em] {{ $commitHasRefs ? 'text-[9px]' : 'text-[8px]' }} text-gray-500">Merge</span>
                                                     @endif
@@ -884,6 +895,9 @@
                             <div class="mt-3 rounded-lg border border-[#2a2f3b] bg-[#171b23] p-4">
                                 @if ($selectedHistoryType === 'commit' && $selectedCommitData)
                                     <div class="text-[1.05rem] leading-snug text-gray-100 whitespace-pre-wrap">{{ $selectedCommitData['message'] }}</div>
+                                    @if ($selectedCommitData['description'] !== '')
+                                        <div data-commit-description class="mt-2 whitespace-pre-wrap break-words text-sm leading-relaxed text-gray-400">{{ $selectedCommitData['description'] }}</div>
+                                    @endif
                                     <div class="mt-4 flex items-start justify-between gap-3">
                                         <div class="flex items-center gap-3">
                                             <div class="relative h-11 w-11 overflow-hidden rounded-full border border-[#2a2f3b] bg-[#0f1218]">
@@ -1268,5 +1282,42 @@
                 </button>
             </div>
         </div>
+    @endif
+
+    <x-operation-modal
+        message="Committing changes…"
+        operation="commit"
+        wire:loading.flex
+        wire:target="createCommit"
+    />
+
+    <x-operation-modal
+        message="Pulling changes from the remote…"
+        operation="pull"
+        wire:loading.flex
+        wire:target="pullRemote"
+    />
+
+    <x-operation-modal
+        message="Pushing commits to the remote…"
+        operation="push"
+        wire:loading.flex
+        wire:target="pushRemote"
+    />
+
+    @if ($remoteOperation === 'pull')
+        <x-operation-modal
+            class="flex"
+            message="Pulling changes from the remote…"
+            operation="pull"
+            data-operation-modal-persistent
+        />
+    @elseif ($remoteOperation === 'push')
+        <x-operation-modal
+            class="flex"
+            message="Pushing commits to the remote…"
+            operation="push"
+            data-operation-modal-persistent
+        />
     @endif
 </div>

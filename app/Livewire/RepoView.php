@@ -1697,6 +1697,7 @@ class RepoView extends Component
                 'date' => $c->date->toIso8601String(),
                 'dateHuman' => $c->date->diffForHumans(),
                 'message' => mb_substr($c->message, 0, self::MAX_COMMIT_MESSAGE_LENGTH),
+                'description' => $c->description,
                 'refs' => array_slice($c->refs, 0, self::MAX_COMMIT_REFS),
                 'isMerge' => $c->isMerge(),
                 'avatarUrl' => $this->avatarUrlForEmail($c->email),

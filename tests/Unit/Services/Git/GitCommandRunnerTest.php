@@ -174,10 +174,7 @@ class GitCommandRunnerTest extends TestCase
         $result = $this->runner->log(5);
 
         $this->assertTrue($result->success);
-        // Our format uses | as delimiter, each line should have pipe chars
-        $lines = $result->lines();
-        $this->assertNotEmpty($lines);
-        $this->assertStringContainsString('|', $lines[0]);
+        $this->assertGreaterThanOrEqual(9, substr_count($result->output, "\0"));
     }
 
     #[Test]

@@ -91,6 +91,26 @@ class RepoViewTest extends TestCase
         );
     }
 
+    public function test_commit_description_renders_in_the_graph_and_selected_commit_details(): void
+    {
+        $description = "Explains the change.\n\nIncludes the full second paragraph.";
+        $this->bindSelectableGitServiceMock();
+
+        $component = Livewire::test(RepoView::class, [
+            'path' => '/fake/repo',
+            'tabId' => 'tab-1',
+            'isActive' => true,
+        ])
+            ->assertSeeHtml('data-commit-description-preview')
+            ->assertSee('Explains the change.')
+            ->call('selectCommit', 'abc123456789')
+            ->assertSet('selectedCommitData.description', $description)
+            ->assertSeeHtml('data-commit-description')
+            ->assertSee('Includes the full second paragraph.');
+
+        $this->assertStringContainsString('whitespace-pre-wrap', $component->html());
+    }
+
     public function test_targeting_the_current_checkout_reveals_and_dispatches_its_commit_row(): void
     {
         $this->bindSelectableGitServiceMock();
@@ -129,6 +149,48 @@ class RepoViewTest extends TestCase
             ->assertSet('commitSummary', '')
             ->assertSet('commitDescription', '')
             ->assertDispatched('toast', message: 'Committed: UI commit works', type: 'success');
+    }
+
+    public function test_commit_pull_and_push_render_central_operation_modals(): void
+    {
+        $this->bindGitServiceMock(loadCount: 1);
+
+        $html = Livewire::test(RepoView::class, [
+            'path' => '/fake/repo',
+            'tabId' => 'tab-1',
+            'isActive' => true,
+        ])->html();
+
+        $this->assertStringContainsString('data-operation-modal="commit"', $html);
+        $this->assertStringContainsString('wire:target="createCommit"', $html);
+        $this->assertStringContainsString('Committing changes…', $html);
+        $this->assertStringContainsString('data-operation-modal="pull"', $html);
+        $this->assertStringContainsString('wire:target="pullRemote"', $html);
+        $this->assertStringContainsString('Pulling changes from the remote…', $html);
+        $this->assertStringContainsString('data-operation-modal="push"', $html);
+        $this->assertStringContainsString('wire:target="pushRemote"', $html);
+        $this->assertStringContainsString('Pushing commits to the remote…', $html);
+    }
+
+    public function test_native_pull_and_push_keep_the_modal_open_until_the_process_exits(): void
+    {
+        $this->bindGitServiceMock(loadCount: 1);
+
+        $component = Livewire::test(RepoView::class, [
+            'path' => '/fake/repo',
+            'tabId' => 'tab-1',
+            'isActive' => true,
+        ]);
+
+        $component
+            ->set('remoteOperation', 'pull')
+            ->assertSeeHtml('data-operation-modal-persistent')
+            ->assertSee('Pulling changes from the remote…', false)
+            ->set('remoteOperation', 'push')
+            ->assertSeeHtml('data-operation-modal-persistent')
+            ->assertSee('Pushing commits to the remote…', false)
+            ->set('remoteOperation', null)
+            ->assertDontSeeHtml('data-operation-modal-persistent');
     }
 
     public function test_selecting_a_branch_populates_history_diffs_without_opening_the_centre_diff(): void
@@ -431,6 +493,7 @@ class RepoViewTest extends TestCase
             email: 'test@example.com',
             date: CarbonImmutable::parse('2026-04-01T12:00:00Z'),
             message: 'Initial commit',
+            description: "Explains the change.\n\nIncludes the full second paragraph.",
             refs: ['HEAD -> main'],
         );
 

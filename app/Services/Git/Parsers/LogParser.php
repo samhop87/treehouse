@@ -6,9 +6,9 @@ use App\DTOs\Commit;
 use Carbon\CarbonImmutable;
 
 /**
- * Parses output of `git log --format='%H|%h|%P|%an|%ae|%aI|%D|%s'`.
+ * Parses NUL-delimited output from GitCommandRunner::log().
  *
- * Fields (pipe-delimited):
+ * Fields (NUL-delimited, nine per commit):
  *   %H  - full hash
  *   %h  - short hash
  *   %P  - parent hashes (space-separated, empty for root)
@@ -17,6 +17,7 @@ use Carbon\CarbonImmutable;
  *   %aI - author date (ISO 8601 strict)
  *   %D  - ref decorations (comma-separated, empty if none)
  *   %s  - subject line
+ *   %b  - body
  */
 class LogParser
 {
@@ -27,40 +28,35 @@ class LogParser
      */
     public function parse(string $output): array
     {
-        $output = trim($output);
-
         if ($output === '') {
             return [];
         }
 
-        $lines = explode("\n", $output);
+        $fields = explode("\0", $output);
+
+        if (end($fields) === '') {
+            array_pop($fields);
+        }
+
         $commits = [];
 
-        foreach ($lines as $line) {
-            $line = trim($line);
-            if ($line === '') {
+        foreach (array_chunk($fields, 9) as $record) {
+            if (count($record) !== 9) {
                 continue;
             }
 
-            $commit = $this->parseLine($line);
-            if ($commit !== null) {
-                $commits[] = $commit;
-            }
+            $commits[] = $this->parseRecord($record);
         }
 
         return $commits;
     }
 
-    private function parseLine(string $line): ?Commit
+    /**
+     * @param  array{string, string, string, string, string, string, string, string, string}  $record
+     */
+    private function parseRecord(array $record): Commit
     {
-        // Split on pipe, limit to 8 parts (subject may contain pipes)
-        $parts = explode('|', $line, 8);
-
-        if (count($parts) < 8) {
-            return null;
-        }
-
-        [$hash, $shortHash, $parentStr, $author, $email, $dateStr, $refsStr, $message] = $parts;
+        [$hash, $shortHash, $parentStr, $author, $email, $dateStr, $refsStr, $message, $description] = $record;
 
         // Parse parents: space-separated hashes, empty string for root commits
         $parents = $parentStr !== '' ? explode(' ', $parentStr) : [];
@@ -76,6 +72,7 @@ class LogParser
             email: $email,
             date: CarbonImmutable::parse($dateStr),
             message: $message,
+            description: trim($description),
             refs: $refs,
         );
     }

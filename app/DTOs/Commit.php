@@ -10,14 +10,15 @@ use Carbon\CarbonImmutable;
 final readonly class Commit
 {
     /**
-     * @param string        $hash       Full SHA hash
-     * @param string        $shortHash  Abbreviated hash
-     * @param list<string>  $parents    Parent commit hashes (empty for root, 2+ for merge)
-     * @param string        $author     Author name
-     * @param string        $email      Author email
-     * @param CarbonImmutable $date     Author date
-     * @param string        $message    Subject line
-     * @param list<string>  $refs       Ref decorations (branch names, tags, HEAD)
+     * @param  string  $hash  Full SHA hash
+     * @param  string  $shortHash  Abbreviated hash
+     * @param  list<string>  $parents  Parent commit hashes (empty for root, 2+ for merge)
+     * @param  string  $author  Author name
+     * @param  string  $email  Author email
+     * @param  CarbonImmutable  $date  Author date
+     * @param  string  $message  Subject line
+     * @param  string  $description  Commit body
+     * @param  list<string>  $refs  Ref decorations (branch names, tags, HEAD)
      */
     public function __construct(
         public string $hash,
@@ -27,6 +28,7 @@ final readonly class Commit
         public string $email,
         public CarbonImmutable $date,
         public string $message,
+        public string $description = '',
         public array $refs = [],
     ) {}
 

@@ -162,7 +162,8 @@ class GitCommandRunner
     {
         $args = [
             'log',
-            '--format=%H|%h|%P|%an|%ae|%aI|%D|%s',
+            '-z',
+            '--format=%H%x00%h%x00%P%x00%an%x00%ae%x00%aI%x00%D%x00%s%x00%b',
             "-n{$limit}",
             ...$extraArgs,
         ];
