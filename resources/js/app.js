@@ -323,8 +323,8 @@ document.addEventListener('alpine:init', () => {
             });
         },
 
-        gridTemplateColumns() {
-            return `${this.branchColumnWidth}px ${Math.max(this.graphWidth, this.graphColumnWidth)}px minmax(240px, 1fr)`;
+        graphLayoutStyle() {
+            return `--branch-column-width:${this.branchColumnWidth}px; --graph-layout-width:${Math.max(this.graphWidth, this.graphColumnWidth)}px;`;
         },
 
         avatarStyle(hash) {

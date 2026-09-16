@@ -105,8 +105,11 @@ class RepoViewTest extends TestCase
         $javascript = file_get_contents(resource_path('js/app.js'));
 
         $this->assertStringNotContainsString('x-effect="$wire.commits', $html);
+        $this->assertStringContainsString(':style="graphLayoutStyle()"', $html);
+        $this->assertStringContainsString('style="grid-template-columns: var(--branch-column-width) var(--graph-layout-width) minmax(240px, 1fr)"', $html);
         $this->assertStringContainsString('component.id !== this.$wire.id', $javascript);
         $this->assertStringContainsString('if (!graphChanged && !selectionChanged) return;', $javascript);
+        $this->assertStringContainsString('graphLayoutStyle()', $javascript);
         $this->assertStringContainsString('if (this._removeCommitHook) this._removeCommitHook();', $javascript);
     }
 

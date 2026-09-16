@@ -773,6 +773,7 @@
                             class="h-full overflow-auto"
                             x-data="commitGraph()"
                             wire:ignore.self
+                            :style="graphLayoutStyle()"
                         >
                             @if ($focusedHistoryRef !== null || $historyLimit > 200)
                                 <div class="sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-cyan-800/40 bg-cyan-950/30 px-4 py-2 text-xs text-cyan-200">
@@ -794,7 +795,7 @@
                             @if (count($commits) > 0)
                                 <div
                                     class="sticky top-0 z-20 grid border-b border-[#353a46] bg-[#242933] text-[10px] font-medium uppercase tracking-[0.18em] text-gray-500"
-                                    :style="'grid-template-columns:' + gridTemplateColumns()"
+                                    style="grid-template-columns: var(--branch-column-width) var(--graph-layout-width) minmax(240px, 1fr)"
                                 >
                                     <div class="relative border-r border-[#1e1e32] px-4 py-2">
                                         Branch / Tag
@@ -840,7 +841,7 @@
                                 <div class="relative text-xs font-mono">
                                     <div
                                         class="pointer-events-none absolute inset-y-0"
-                                        :style="'left:' + branchColumnWidth + 'px; width:' + Math.max(graphWidth, graphColumnWidth) + 'px;'"
+                                        style="left: var(--branch-column-width); width: var(--graph-layout-width)"
                                     >
                                         <canvas x-ref="graphCanvas" wire:ignore class="absolute top-0 left-0"></canvas>
                                     </div>
@@ -857,7 +858,7 @@
                                             data-history-context-menu-trigger
                                             class="grid h-10 cursor-pointer items-stretch border-b border-[#232833] transition-colors hover:bg-[#202531] {{ $selectedHistoryType === 'commit' && $selectedCommit === $commit['hash'] ? 'bg-violet-900/20' : '' }}"
                                             :class="{ 'ring-1 ring-inset ring-violet-400 bg-violet-900/30': targetedCommitHash === @js($commit['hash']) }"
-                                            :style="'grid-template-columns:' + gridTemplateColumns()"
+                                            style="grid-template-columns: var(--branch-column-width) var(--graph-layout-width) minmax(240px, 1fr)"
                                             title="Click to inspect changed files. Double-click to checkout this commit."
                                         >
                                             <div class="flex min-w-0 items-center overflow-hidden border-r border-[#1e1e32] {{ $commitHasRefs ? 'px-3 py-1.5' : 'px-2.5 py-1' }}">
