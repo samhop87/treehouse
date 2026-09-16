@@ -87,6 +87,21 @@ class GitCommandRunnerTest extends TestCase
     }
 
     #[Test]
+    public function it_resolves_the_absolute_git_directory(): void
+    {
+        $repo = $this->findTestRepo();
+        if ($repo === null) {
+            $this->markTestSkipped('No test git repository available.');
+        }
+
+        $this->runner->setRepoPath($repo);
+        $gitDir = $this->runner->absoluteGitDir();
+
+        $this->assertNotNull($gitDir);
+        $this->assertDirectoryExists($gitDir);
+    }
+
+    #[Test]
     public function it_detects_invalid_repo_path(): void
     {
         $this->runner->setRepoPath('/tmp');

@@ -32,6 +32,8 @@ class GitService
 {
     private ?string $repoPath = null;
 
+    private ?string $gitDir = null;
+
     public function __construct(
         private readonly GitCommandRunner $commandRunner,
         private readonly StatusParser $statusParser,
@@ -50,9 +52,16 @@ class GitService
     public function open(string $path): self
     {
         $this->repoPath = $path;
+        $this->gitDir = null;
         $this->commandRunner->setRepoPath($path);
 
-        if (! $this->commandRunner->isValidRepo()) {
+        // This validates the repository and gives operation-state checks a path
+        // they can inspect without starting more Git processes.
+        $this->gitDir = $this->commandRunner->absoluteGitDir();
+
+        // Keep compatibility with older Git versions that do not support
+        // `--absolute-git-dir`.
+        if ($this->gitDir === null && ! $this->commandRunner->isValidRepo()) {
             $this->repoPath = null;
             throw new \RuntimeException("Not a git repository: {$path}");
         }
@@ -731,6 +740,22 @@ class GitService
     {
         $this->ensureOpen();
 
+        if ($this->gitDir !== null) {
+            if (file_exists($this->gitDir.DIRECTORY_SEPARATOR.'rebase-merge')
+                || file_exists($this->gitDir.DIRECTORY_SEPARATOR.'rebase-apply')) {
+                return 'rebase';
+            }
+
+            foreach (['MERGE_HEAD' => 'merge', 'CHERRY_PICK_HEAD' => 'cherry-pick', 'REVERT_HEAD' => 'revert'] as $path => $operation) {
+                if (file_exists($this->gitDir.DIRECTORY_SEPARATOR.$path)) {
+                    return $operation;
+                }
+            }
+
+            return null;
+        }
+
+        // Fallback for Git versions without `--absolute-git-dir` support.
         if ($this->gitPathExists('rebase-merge') || $this->gitPathExists('rebase-apply')) {
             return 'rebase';
         }

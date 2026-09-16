@@ -125,6 +125,29 @@ class GitCommandRunner
     }
 
     /**
+     * Resolve the repository's real Git directory in one command.
+     *
+     * This also validates the repository and works for linked worktrees, where
+     * `.git` is a file that points somewhere outside the working tree.
+     */
+    public function absoluteGitDir(): ?string
+    {
+        if ($this->repoPath === null) {
+            return null;
+        }
+
+        $result = $this->run(['rev-parse', '--absolute-git-dir']);
+
+        if (! $result->success) {
+            return null;
+        }
+
+        $path = rtrim($result->output, "\r\n");
+
+        return $path !== '' ? $path : null;
+    }
+
+    /**
      * Get the git version string.
      */
     public function version(): ?string

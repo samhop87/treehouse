@@ -193,14 +193,16 @@ class RepoView extends Component
         $this->loadRepoData();
     }
 
-    private function loadRepoData(): void
+    private function loadRepoData(?GitService $git = null): void
     {
         $this->isLoading = true;
         $this->errorMessage = '';
 
         try {
-            $git = app(GitService::class);
-            $git->open($this->path);
+            if ($git === null) {
+                $git = app(GitService::class);
+                $git->open($this->path);
+            }
 
             // Load status
             $state = $git->getStatus();
@@ -851,11 +853,13 @@ class RepoView extends Component
         $this->checkoutLocalBranch($branchName);
     }
 
-    private function loadWorkingTreeFileDiff(): void
+    private function loadWorkingTreeFileDiff(?GitService $git = null): void
     {
         try {
-            $git = app(GitService::class);
-            $git->open($this->path);
+            if ($git === null) {
+                $git = app(GitService::class);
+                $git->open($this->path);
+            }
 
             $diffs = $git->getFileDiff($this->selectedFile, $this->selectedFileStaged);
             $this->diffFiles = $this->serializeDiffFiles($diffs);
@@ -931,7 +935,7 @@ class RepoView extends Component
      */
     public function stageFile(string $path): void
     {
-        $this->runGitAction(fn (GitService $git) => $git->stage([$path]));
+        $this->runGitAction(fn (GitService $git) => $git->stage([$path]), fullRefresh: false);
     }
 
     /**
@@ -939,7 +943,7 @@ class RepoView extends Component
      */
     public function stageAll(): void
     {
-        $this->runGitAction(fn (GitService $git) => $git->stageAll());
+        $this->runGitAction(fn (GitService $git) => $git->stageAll(), fullRefresh: false);
     }
 
     /**
@@ -953,7 +957,7 @@ class RepoView extends Component
             $file['origPath'] ?? null,
         ])));
 
-        $this->runGitAction(fn (GitService $git) => $git->unstage($paths));
+        $this->runGitAction(fn (GitService $git) => $git->unstage($paths), fullRefresh: false);
     }
 
     /**
@@ -961,7 +965,7 @@ class RepoView extends Component
      */
     public function unstageAll(): void
     {
-        $this->runGitAction(fn (GitService $git) => $git->unstageAll());
+        $this->runGitAction(fn (GitService $git) => $git->unstageAll(), fullRefresh: false);
     }
 
     /**
@@ -969,7 +973,7 @@ class RepoView extends Component
      */
     public function discardFile(string $path): void
     {
-        $this->runGitAction(fn (GitService $git) => $git->discardChanges([$path]));
+        $this->runGitAction(fn (GitService $git) => $git->discardChanges([$path]), fullRefresh: false);
     }
 
     // ─── COMMIT ──────────────────────────────────────────────────────────
@@ -1289,7 +1293,7 @@ class RepoView extends Component
             $git->open($this->path);
 
             $result = $git->merge($branch);
-            $this->loadRepoData();
+            $this->loadRepoData($git);
 
             if ($result->success) {
                 $this->dispatch('toast', message: "Merged '{$branch}'", type: 'success');
@@ -1549,7 +1553,7 @@ class RepoView extends Component
             $git = app(GitService::class);
             $git->open($this->path);
             $result = $git->stashApply($ref);
-            $this->loadRepoData();
+            $this->loadRepoData($git);
 
             if ($result->success) {
                 $this->dispatch('toast', message: "Applied {$ref}", type: 'success');
@@ -1572,7 +1576,7 @@ class RepoView extends Component
             $git = app(GitService::class);
             $git->open($this->path);
             $result = $git->stashPop($ref);
-            $this->loadRepoData();
+            $this->loadRepoData($git);
 
             if ($result->success) {
                 $this->dispatch('toast', message: "Popped {$ref}", type: 'success');
@@ -1636,7 +1640,7 @@ class RepoView extends Component
                 $git = app(GitService::class);
                 $git->open($this->path);
                 $git->fetch();
-                $this->loadRepoData();
+                $this->loadRepoData($git);
 
                 $pendingRemoteCheckout = $this->pendingRemoteCheckout;
                 $this->pendingRemoteCheckout = null;
@@ -1677,7 +1681,7 @@ class RepoView extends Component
                 $git = app(GitService::class);
                 $git->open($this->path);
                 $result = $git->pull();
-                $this->loadRepoData();
+                $this->loadRepoData($git);
 
                 if ($result->success) {
                     $this->dispatch('toast', message: 'Pulled from remote', type: 'success');
@@ -1726,7 +1730,7 @@ class RepoView extends Component
                     branch: $setUpstream && $this->currentBranch ? $this->currentBranch : null,
                     setUpstream: $setUpstream,
                 );
-                $this->loadRepoData();
+                $this->loadRepoData($git);
                 $this->dispatch('toast', message: 'Pushed to remote', type: 'success');
             } catch (\RuntimeException $e) {
                 $this->errorMessage = $e->getMessage();
@@ -1871,6 +1875,7 @@ class RepoView extends Component
         callable $action,
         ?string $successMessage = null,
         bool $resetGraphHistory = false,
+        bool $fullRefresh = true,
     ): void {
         $this->errorMessage = '';
 
@@ -1881,7 +1886,11 @@ class RepoView extends Component
             if ($resetGraphHistory) {
                 $this->resetGraphHistory();
             }
-            $this->loadRepoData();
+            if ($fullRefresh) {
+                $this->loadRepoData($git);
+            } else {
+                $this->refreshWorkingTreeData($git);
+            }
 
             if ($successMessage) {
                 $this->dispatch('toast', message: $successMessage, type: 'success');
@@ -1902,7 +1911,7 @@ class RepoView extends Component
             $git = app(GitService::class);
             $git->open($this->path);
             $result = $action($git);
-            $this->loadRepoData();
+            $this->loadRepoData($git);
 
             if ($result->success) {
                 $this->dispatch('toast', message: $successMessage, type: 'success');
@@ -1911,6 +1920,26 @@ class RepoView extends Component
             }
         } catch (\RuntimeException $e) {
             $this->errorMessage = $e->getMessage();
+        }
+    }
+
+    /**
+     * Refresh only state affected by stage, unstage, and discard actions.
+     * Commit history and refs cannot change during these operations, so avoid
+     * re-querying them on every file click.
+     */
+    private function refreshWorkingTreeData(GitService $git): void
+    {
+        $state = $git->getStatus();
+        $this->populateStatusFromState($state);
+        $this->currentOperation = $git->getOperationState();
+
+        if ($state->hasConflicts() && $this->currentOperation === null) {
+            $this->currentOperation = 'conflict';
+        }
+
+        if ($this->selectedHistoryType === null && $this->selectedFile !== null) {
+            $this->loadWorkingTreeFileDiff($git);
         }
     }
 

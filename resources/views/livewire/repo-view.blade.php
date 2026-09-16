@@ -772,7 +772,6 @@
                         <div
                             class="h-full overflow-auto"
                             x-data="commitGraph()"
-                            x-effect="$wire.commits; $wire.selectedCommit; updateGraph()"
                             wire:ignore.self
                         >
                             @if ($focusedHistoryRef !== null || $historyLimit > 200)

@@ -282,28 +282,45 @@ document.addEventListener('alpine:init', () => {
         nodes: [],
         nodeMap: {},
         _alive: true,
+        _graphKey: null,
+        _selectedHash: null,
+        _drawFrame: null,
+        _removeCommitHook: null,
 
         init() {
-            this.computeAndDraw();
+            this.scheduleDraw();
 
-            // Redraw after every Livewire server roundtrip.
-            // x-effect with $wire properties doesn't reliably re-fire after
-            // DOM morphing, so this acts as a belt-and-suspenders fallback
-            // that fires after ALL successful Livewire updates.
-            Livewire.hook('commit', ({ succeed }) => {
+            // Redraw once after this graph's component updates. Previously
+            // every graph redrew after every Livewire request in the window.
+            this._removeCommitHook = Livewire.hook('commit', ({ component, succeed }) => {
+                if (component.id !== this.$wire.id) return;
+
                 succeed(() => {
                     if (!this._alive) return;
-                    this.$nextTick(() => this.computeAndDraw());
+                    this.scheduleDraw();
                 });
             });
         },
 
         destroy() {
             this._alive = false;
+            if (this._drawFrame !== null) window.cancelAnimationFrame(this._drawFrame);
+            if (this._removeCommitHook) this._removeCommitHook();
         },
 
         updateGraph() {
-            this.$nextTick(() => this.computeAndDraw());
+            this.scheduleDraw();
+        },
+
+        scheduleDraw() {
+            if (this._drawFrame !== null) window.cancelAnimationFrame(this._drawFrame);
+
+            this.$nextTick(() => {
+                this._drawFrame = window.requestAnimationFrame(() => {
+                    this._drawFrame = null;
+                    if (this._alive) this.computeAndDraw();
+                });
+            });
         },
 
         gridTemplateColumns() {
@@ -321,18 +338,32 @@ document.addEventListener('alpine:init', () => {
         computeAndDraw() {
             const commits = this.$wire.get('commits') || [];
             const selectedHash = this.$wire.get('selectedCommit');
+            const graphKey = commits
+                .map(commit => `${commit.hash}:${(commit.parents || []).join(',')}`)
+                .join('|');
+
+            const graphChanged = graphKey !== this._graphKey;
+            const selectionChanged = selectedHash !== this._selectedHash;
+
+            if (!graphChanged && !selectionChanged) return;
+
+            this._graphKey = graphKey;
+            this._selectedHash = selectedHash;
 
             if (commits.length === 0) {
                 this.graphWidth = 40;
+                this.nodes = [];
                 this.nodeMap = {};
                 return;
             }
 
-            this.nodes = computeGraphLayout(commits);
-            this.nodeMap = this.nodes.reduce((carry, node) => {
-                carry[node.hash] = node;
-                return carry;
-            }, {});
+            if (graphChanged) {
+                this.nodes = computeGraphLayout(commits);
+                this.nodeMap = this.nodes.reduce((carry, node) => {
+                    carry[node.hash] = node;
+                    return carry;
+                }, {});
+            }
 
             const canvas = this.$refs.graphCanvas;
             if (!canvas) return;

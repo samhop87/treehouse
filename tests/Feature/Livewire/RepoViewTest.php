@@ -93,6 +93,23 @@ class RepoViewTest extends TestCase
         );
     }
 
+    public function test_commit_graph_uses_one_component_scoped_redraw_path(): void
+    {
+        $this->bindSelectableGitServiceMock();
+
+        $html = Livewire::test(RepoView::class, [
+            'path' => '/fake/repo',
+            'tabId' => 'tab-1',
+            'isActive' => true,
+        ])->html();
+        $javascript = file_get_contents(resource_path('js/app.js'));
+
+        $this->assertStringNotContainsString('x-effect="$wire.commits', $html);
+        $this->assertStringContainsString('component.id !== this.$wire.id', $javascript);
+        $this->assertStringContainsString('if (!graphChanged && !selectionChanged) return;', $javascript);
+        $this->assertStringContainsString('if (this._removeCommitHook) this._removeCommitHook();', $javascript);
+    }
+
     public function test_commit_description_renders_in_the_graph_and_selected_commit_details(): void
     {
         $description = "Explains the change.\n\nIncludes the full second paragraph.";
@@ -130,7 +147,7 @@ class RepoViewTest extends TestCase
 
     public function test_create_commit_invokes_git_with_summary_and_description(): void
     {
-        $git = $this->bindGitServiceMock(loadCount: 2, openCount: 3);
+        $git = $this->bindGitServiceMock(loadCount: 2, openCount: 2);
         $git->shouldReceive('commit')->once()->with("UI commit works\n\nThis explains the change.")->andReturn(new GitResult(
             success: true,
             output: '',
@@ -151,6 +168,30 @@ class RepoViewTest extends TestCase
             ->assertSet('commitSummary', '')
             ->assertSet('commitDescription', '')
             ->assertDispatched('toast', message: 'Committed: UI commit works', type: 'success');
+    }
+
+    public function test_stage_file_refreshes_working_tree_without_reloading_history_or_refs(): void
+    {
+        $git = $this->bindGitServiceMock(
+            loadCount: 1,
+            openCount: 2,
+            workingTreeRefreshCount: 1,
+        );
+        $git->shouldReceive('stage')->once()->with(['README.md'])->andReturn(new GitResult(
+            success: true,
+            output: '',
+            error: '',
+            exitCode: 0,
+            command: 'git add -- README.md',
+        ));
+
+        Livewire::test(RepoView::class, [
+            'path' => '/fake/repo',
+            'tabId' => 'tab-1',
+            'isActive' => true,
+        ])
+            ->call('stageFile', 'README.md')
+            ->assertSet('errorMessage', '');
     }
 
     public function test_commit_pull_and_push_render_central_operation_modals(): void
@@ -762,8 +803,11 @@ class RepoViewTest extends TestCase
             ->assertSet('errorMessage', 'Push failed: remote: permission denied');
     }
 
-    private function bindGitServiceMock(int $loadCount, ?int $openCount = null): MockInterface
-    {
+    private function bindGitServiceMock(
+        int $loadCount,
+        ?int $openCount = null,
+        int $workingTreeRefreshCount = 0,
+    ): MockInterface {
         $state = new RepoState(
             headHash: 'abc1234',
             branch: 'main',
@@ -797,8 +841,8 @@ class RepoViewTest extends TestCase
 
         $git = Mockery::mock(GitService::class);
         $git->shouldReceive('open')->times($openCount ?? $loadCount)->with('/fake/repo')->andReturnSelf();
-        $git->shouldReceive('getStatus')->times($loadCount)->andReturn($state);
-        $git->shouldReceive('getOperationState')->times($loadCount)->andReturnNull();
+        $git->shouldReceive('getStatus')->times($loadCount + $workingTreeRefreshCount)->andReturn($state);
+        $git->shouldReceive('getOperationState')->times($loadCount + $workingTreeRefreshCount)->andReturnNull();
         $git->shouldReceive('getLog')->times($loadCount)->with(200, true)->andReturn([$commit]);
         $git->shouldReceive('getBranches')->times($loadCount)->andReturn([$branch]);
         $git->shouldReceive('getTags')->times($loadCount)->andReturn([]);
