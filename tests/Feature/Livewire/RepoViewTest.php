@@ -194,7 +194,7 @@ class RepoViewTest extends TestCase
             ->assertSet('errorMessage', '');
     }
 
-    public function test_commit_pull_and_push_render_central_operation_modals(): void
+    public function test_commit_pull_push_and_checkout_render_central_operation_modals(): void
     {
         $this->bindGitServiceMock(loadCount: 1);
 
@@ -213,6 +213,9 @@ class RepoViewTest extends TestCase
         $this->assertStringContainsString('data-operation-modal="push"', $html);
         $this->assertStringContainsString('wire:target="pushRemote"', $html);
         $this->assertStringContainsString('Pushing commits to the remote…', $html);
+        $this->assertStringContainsString('data-operation-modal="checkout"', $html);
+        $this->assertStringContainsString('wire:target="checkoutBranch, checkoutWorkspaceBranch, checkoutLocalBranch, checkoutRemoteBranch, requestRemoteCheckout, checkoutGraphRef, checkoutContextMenuBranchAction, checkoutExistingRemoteChoice, fastForwardRemoteChoice, resetRemoteCheckoutChoice"', $html);
+        $this->assertStringContainsString('Checking out branch…', $html);
     }
 
     public function test_native_pull_and_push_keep_the_modal_open_until_the_process_exits(): void
@@ -232,6 +235,10 @@ class RepoViewTest extends TestCase
             ->set('remoteOperation', 'push')
             ->assertSeeHtml('data-operation-modal-persistent')
             ->assertSee('Pushing commits to the remote…', false)
+            ->set('remoteOperation', 'fetch')
+            ->set('pendingRemoteCheckout', 'origin/feature/test')
+            ->assertSeeHtml('data-operation-modal-persistent')
+            ->assertSee('Preparing branch checkout…', false)
             ->set('remoteOperation', null)
             ->assertDontSeeHtml('data-operation-modal-persistent');
     }

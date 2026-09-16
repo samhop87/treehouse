@@ -1484,6 +1484,13 @@
         wire:target="pushRemote"
     />
 
+    <x-operation-modal
+        message="Checking out branch…"
+        operation="checkout"
+        wire:loading.flex
+        wire:target="checkoutBranch, checkoutWorkspaceBranch, checkoutLocalBranch, checkoutRemoteBranch, requestRemoteCheckout, checkoutGraphRef, checkoutContextMenuBranchAction, checkoutExistingRemoteChoice, fastForwardRemoteChoice, resetRemoteCheckoutChoice"
+    />
+
     @if ($remoteOperation === 'pull')
         <x-operation-modal
             class="flex"
@@ -1496,6 +1503,13 @@
             class="flex"
             message="Pushing commits to the remote…"
             operation="push"
+            data-operation-modal-persistent
+        />
+    @elseif ($remoteOperation === 'fetch' && $pendingRemoteCheckout !== null)
+        <x-operation-modal
+            class="flex"
+            message="Preparing branch checkout…"
+            operation="checkout"
             data-operation-modal-persistent
         />
     @endif
