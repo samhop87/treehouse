@@ -69,7 +69,7 @@ Retain the previous DMG until the new build has passed these checks. Installatio
 - System Git is required; Git is not bundled in 0.1.0.
 - Staging works at whole-file level; hunk and line staging are not implemented.
 - Rebase supports branch-target rebase and conflict recovery; interactive squash/reorder is not implemented.
-- The history graph loads the most recent 200 commits.
+- The history graph initially loads the most recent 200 commits. Treehouse can focus on a selected branch, or expand all-ref history in 200-commit batches up to 1,600 commits; checking out another branch returns it to the default view.
 - GitHub repository discovery is optional. Local repositories and manual clone URLs work without it.
 - NativePHP's secure-source bundle is not installed, so PHP application source is readable inside this beta's app bundle.
 - An unsigned development DMG is suitable for local testing only. A work-Mac release must pass the signing and notarization checks above.

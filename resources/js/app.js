@@ -10,11 +10,177 @@ document.addEventListener('alpine:init', () => {
         targetHighlightTimer: null,
         graphRefClickTimer: null,
         branchClickTimer: null,
+        layoutStorageKey: 'treehouse.repo-layout-widths.v1',
+        filterPanelWidth: 280,
+        branchColumnWidth: 192,
+        graphColumnWidth: 96,
+        detailPanelWidth: 510,
+        activeResize: null,
+        resizeMouseMoveHandler: null,
+        resizeMouseUpHandler: null,
+        layoutSyncHandler: null,
+        storageSyncHandler: null,
         referenceSections: {
             local: false,
             remote: false,
             stashes: false,
             tags: true,
+        },
+
+        init() {
+            this.restoreLayoutWidths();
+
+            this.layoutSyncHandler = (event) => {
+                this.applyLayoutWidths(event.detail);
+            };
+            this.storageSyncHandler = (event) => {
+                if (event.key !== this.layoutStorageKey || !event.newValue) return;
+
+                try {
+                    this.applyLayoutWidths(JSON.parse(event.newValue));
+                } catch {
+                    // Ignore malformed or unavailable persisted layout data.
+                }
+            };
+
+            window.addEventListener('treehouse-layout-widths-updated', this.layoutSyncHandler);
+            window.addEventListener('storage', this.storageSyncHandler);
+        },
+
+        destroy() {
+            this.stopWidthResize();
+            window.clearTimeout(this.targetHighlightTimer);
+            window.clearTimeout(this.graphRefClickTimer);
+            window.clearTimeout(this.branchClickTimer);
+            window.removeEventListener('treehouse-layout-widths-updated', this.layoutSyncHandler);
+            window.removeEventListener('storage', this.storageSyncHandler);
+        },
+
+        layoutWidthBounds(property, minimumOverride = null) {
+            const bounds = {
+                filterPanelWidth: { min: 180, max: 480 },
+                branchColumnWidth: { min: 120, max: 480 },
+                graphColumnWidth: { min: 72, max: 640 },
+                detailPanelWidth: { min: 360, max: 680 },
+            }[property];
+
+            if (!bounds) return null;
+
+            const min = Math.max(bounds.min, Number(minimumOverride) || 0);
+            let max = Math.max(bounds.max, min);
+
+            if (this.$root) {
+                if (property === 'filterPanelWidth') {
+                    max = Math.min(max, Math.max(min, this.$root.clientWidth - this.detailPanelWidth - 328));
+                }
+                if (property === 'detailPanelWidth') {
+                    max = Math.min(max, Math.max(min, this.$root.clientWidth - this.filterPanelWidth - 328));
+                }
+            }
+
+            return { min, max };
+        },
+
+        clampLayoutWidth(property, width, minimumOverride = null) {
+            const bounds = this.layoutWidthBounds(property, minimumOverride);
+            if (!bounds || !Number.isFinite(Number(width))) return null;
+
+            return Math.round(Math.min(bounds.max, Math.max(bounds.min, Number(width))));
+        },
+
+        applyLayoutWidths(widths) {
+            if (!widths || typeof widths !== 'object') return;
+
+            ['filterPanelWidth', 'branchColumnWidth', 'graphColumnWidth', 'detailPanelWidth'].forEach((property) => {
+                const width = this.clampLayoutWidth(property, widths[property]);
+                if (width !== null) this[property] = width;
+            });
+        },
+
+        restoreLayoutWidths() {
+            try {
+                const savedWidths = window.localStorage.getItem(this.layoutStorageKey);
+                if (savedWidths) this.applyLayoutWidths(JSON.parse(savedWidths));
+            } catch {
+                // Local storage can be unavailable in locked-down browser contexts.
+            }
+        },
+
+        persistLayoutWidths() {
+            const widths = {
+                filterPanelWidth: this.filterPanelWidth,
+                branchColumnWidth: this.branchColumnWidth,
+                graphColumnWidth: this.graphColumnWidth,
+                detailPanelWidth: this.detailPanelWidth,
+            };
+
+            try {
+                window.localStorage.setItem(this.layoutStorageKey, JSON.stringify(widths));
+            } catch {
+                // Resizing should still work for this session if persistence is unavailable.
+            }
+
+            window.dispatchEvent(new CustomEvent('treehouse-layout-widths-updated', { detail: widths }));
+        },
+
+        startWidthResize(event, property, direction = 1, minimumOverride = null) {
+            const bounds = this.layoutWidthBounds(property, minimumOverride);
+            if (!bounds) return;
+
+            this.stopWidthResize();
+            this.activeResize = {
+                property,
+                direction,
+                startX: event.clientX,
+                startWidth: this[property],
+                bounds,
+            };
+
+            this.resizeMouseMoveHandler = (moveEvent) => {
+                if (!this.activeResize) return;
+
+                const delta = (moveEvent.clientX - this.activeResize.startX) * this.activeResize.direction;
+                this[this.activeResize.property] = Math.round(Math.min(
+                    this.activeResize.bounds.max,
+                    Math.max(this.activeResize.bounds.min, this.activeResize.startWidth + delta)
+                ));
+            };
+            this.resizeMouseUpHandler = () => {
+                this.persistLayoutWidths();
+                this.stopWidthResize();
+            };
+
+            document.addEventListener('mousemove', this.resizeMouseMoveHandler);
+            document.addEventListener('mouseup', this.resizeMouseUpHandler);
+            document.body.style.cursor = 'col-resize';
+            document.body.style.userSelect = 'none';
+        },
+
+        resizeWidthFromKeyboard(event, property, direction = 1, minimumOverride = null) {
+            if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+
+            event.preventDefault();
+            const movement = (event.key === 'ArrowRight' ? 10 : -10) * direction;
+            const width = this.clampLayoutWidth(property, this[property] + movement, minimumOverride);
+            if (width === null) return;
+
+            this[property] = width;
+            this.persistLayoutWidths();
+        },
+
+        stopWidthResize() {
+            if (this.resizeMouseMoveHandler) {
+                document.removeEventListener('mousemove', this.resizeMouseMoveHandler);
+            }
+            if (this.resizeMouseUpHandler) {
+                document.removeEventListener('mouseup', this.resizeMouseUpHandler);
+            }
+
+            this.activeResize = null;
+            this.resizeMouseMoveHandler = null;
+            this.resizeMouseUpHandler = null;
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
         },
 
         toggleReferenceSection(name) {
@@ -45,7 +211,7 @@ document.addEventListener('alpine:init', () => {
             window.clearTimeout(this.branchClickTimer);
             this.branchClickTimer = null;
             if (isRemote) {
-                this.$wire.checkoutRemoteBranch(name);
+                this.$wire.requestRemoteCheckout(name);
             } else {
                 this.$wire.checkoutLocalBranch(name);
             }
@@ -104,52 +270,11 @@ document.addEventListener('alpine:init', () => {
         },
     }));
 
-    // Resizable right sidebar splitter
-    Alpine.data('repoLayout', () => ({
-        sidebarWidth: 510,
-        minSidebarWidth: 360,
-        maxSidebarWidth: 680,
-        dragging: false,
-        startX: 0,
-        startWidth: 0,
-
-        startSidebarResize(event) {
-            this.dragging = true;
-            this.startX = event.clientX;
-            this.startWidth = this.sidebarWidth;
-
-            const onMouseMove = (e) => {
-                if (!this.dragging) return;
-                const delta = e.clientX - this.startX;
-                const maxWidth = Math.max(this.minSidebarWidth, Math.min(this.maxSidebarWidth, window.innerWidth - 420));
-                const newWidth = Math.min(
-                    maxWidth,
-                    Math.max(this.minSidebarWidth, this.startWidth - delta)
-                );
-                this.sidebarWidth = newWidth;
-            };
-
-            const onMouseUp = () => {
-                this.dragging = false;
-                document.removeEventListener('mousemove', onMouseMove);
-                document.removeEventListener('mouseup', onMouseUp);
-                document.body.style.cursor = '';
-                document.body.style.userSelect = '';
-            };
-
-            document.addEventListener('mousemove', onMouseMove);
-            document.addEventListener('mouseup', onMouseUp);
-            document.body.style.cursor = 'col-resize';
-            document.body.style.userSelect = 'none';
-        },
-    }));
-
     // Commit graph renderer
     // Reads commits and selectedCommit reactively from Livewire via $wire
     // so graph stays in sync after Livewire re-renders (wire:ignore.self freezes x-data attrs)
     Alpine.data('commitGraph', () => ({
         graphWidth: 40,
-        graphColumnWidth: 96,
         rowHeight: 40,
         laneWidth: 16,
         graphPadding: 10,
@@ -179,6 +304,10 @@ document.addEventListener('alpine:init', () => {
 
         updateGraph() {
             this.$nextTick(() => this.computeAndDraw());
+        },
+
+        gridTemplateColumns() {
+            return `${this.branchColumnWidth}px ${Math.max(this.graphWidth, this.graphColumnWidth)}px minmax(240px, 1fr)`;
         },
 
         avatarStyle(hash) {

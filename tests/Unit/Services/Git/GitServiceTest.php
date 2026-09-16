@@ -207,6 +207,42 @@ class GitServiceTest extends TestCase
     }
 
     #[Test]
+    public function get_log_for_ref_limits_history_to_the_requested_ref(): void
+    {
+        $mockRunner = $this->createMock(GitCommandRunner::class);
+        $mockRunner->method('isValidRepo')->willReturn(true);
+        $mockRunner->method('setRepoPath')->willReturnSelf();
+        $mockRunner->expects($this->once())
+            ->method('log')
+            ->with(25, ['origin/feature/test'])
+            ->willReturn(new GitResult(
+                success: true,
+                output: implode("\0", [
+                    'abc123456789',
+                    'abc1234',
+                    '',
+                    'Test User',
+                    'test@example.com',
+                    '2026-04-01T12:00:00+00:00',
+                    'origin/feature/test',
+                    'Focused commit',
+                    '',
+                    '',
+                ]),
+                error: '',
+                exitCode: 0,
+                command: 'git log -n25 origin/feature/test',
+            ));
+
+        $git = $this->makeGitServiceWithRunner($mockRunner);
+        $git->open('/fake/repo');
+        $commits = $git->getLogForRef('origin/feature/test', 25);
+
+        $this->assertCount(1, $commits);
+        $this->assertSame('abc123456789', $commits[0]->hash);
+    }
+
+    #[Test]
     public function get_branches_returns_branches(): void
     {
         $repo = $this->findTestRepo();
@@ -772,6 +808,82 @@ GIT,
         $result = $git->checkoutRemoteBranch('upstream/feature/team/alpha');
 
         $this->assertTrue($result->success);
+    }
+
+    #[Test]
+    public function checkout_and_fast_forward_refuses_diverged_history_before_checkout(): void
+    {
+        $mockRunner = $this->createMock(GitCommandRunner::class);
+        $mockRunner->method('isValidRepo')->willReturn(true);
+        $mockRunner->method('setRepoPath')->willReturnSelf();
+        $mockRunner->expects($this->once())
+            ->method('run')
+            ->with(['merge-base', '--is-ancestor', 'feature/test', 'origin/feature/test'])
+            ->willReturn(new GitResult(false, '', '', 1, 'git merge-base --is-ancestor'));
+        $mockRunner->expects($this->never())->method('runWithTranslation');
+
+        $git = $this->makeGitServiceWithRunner($mockRunner);
+        $git->open('/fake/repo');
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage("'feature/test' cannot be fast-forwarded");
+        $git->checkoutAndFastForward('feature/test', 'origin/feature/test');
+    }
+
+    #[Test]
+    public function checkout_and_fast_forward_checks_out_then_advances_the_local_branch(): void
+    {
+        $mockRunner = $this->createMock(GitCommandRunner::class);
+        $mockRunner->method('isValidRepo')->willReturn(true);
+        $mockRunner->method('setRepoPath')->willReturnSelf();
+        $mockRunner->expects($this->once())
+            ->method('run')
+            ->with(['merge-base', '--is-ancestor', 'feature/test', 'origin/feature/test'])
+            ->willReturn(new GitResult(true, '', '', 0, 'git merge-base --is-ancestor'));
+        $calls = [];
+        $mockRunner->expects($this->exactly(2))
+            ->method('runWithTranslation')
+            ->willReturnCallback(function (array $args, int $timeout = 30) use (&$calls): GitResult {
+                $calls[] = [$args, $timeout];
+
+                return new GitResult(true, '', '', 0, 'git '.implode(' ', $args));
+            });
+
+        $git = $this->makeGitServiceWithRunner($mockRunner);
+        $git->open('/fake/repo');
+        $result = $git->checkoutAndFastForward('feature/test', 'origin/feature/test');
+
+        $this->assertTrue($result->success);
+        $this->assertSame([
+            [['checkout', 'feature/test'], 30],
+            [['merge', '--ff-only', 'origin/feature/test'], 120],
+        ], $calls);
+    }
+
+    #[Test]
+    public function checkout_and_reset_to_remote_checks_out_then_hard_resets_the_local_branch(): void
+    {
+        $mockRunner = $this->createMock(GitCommandRunner::class);
+        $mockRunner->method('isValidRepo')->willReturn(true);
+        $mockRunner->method('setRepoPath')->willReturnSelf();
+        $calls = [];
+        $mockRunner->expects($this->exactly(2))
+            ->method('runWithTranslation')
+            ->willReturnCallback(function (array $args, int $timeout = 30) use (&$calls): GitResult {
+                $calls[] = [$args, $timeout];
+
+                return new GitResult(true, '', '', 0, 'git '.implode(' ', $args));
+            });
+
+        $git = $this->makeGitServiceWithRunner($mockRunner);
+        $git->open('/fake/repo');
+        $result = $git->checkoutAndResetToRemote('feature/test', 'origin/feature/test');
+
+        $this->assertTrue($result->success);
+        $this->assertSame([
+            [['checkout', 'feature/test'], 30],
+            [['reset', '--hard', 'origin/feature/test'], 120],
+        ], $calls);
     }
 
     #[Test]

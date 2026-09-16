@@ -94,8 +94,8 @@ class GitService
     /**
      * Get the commit log.
      *
-     * @param int $limit Maximum number of commits to return
-     * @param bool $all Include all branches (--all flag)
+     * @param  int  $limit  Maximum number of commits to return
+     * @param  bool  $all  Include all branches (--all flag)
      * @return list<Commit>
      */
     public function getLog(int $limit = 200, bool $all = true): array
@@ -105,6 +105,21 @@ class GitService
         $extraArgs = $all ? ['--all'] : [];
         $result = $this->commandRunner->log($limit, $extraArgs);
         $result->throw('Failed to get commit log');
+
+        return $this->logParser->parse($result->output);
+    }
+
+    /**
+     * Get the history reachable from one branch or remote-tracking ref.
+     *
+     * @return list<Commit>
+     */
+    public function getLogForRef(string $ref, int $limit = 200): array
+    {
+        $this->ensureOpen();
+
+        $result = $this->commandRunner->log($limit, [$ref]);
+        $result->throw("Failed to get commit log for '{$ref}'");
 
         return $this->logParser->parse($result->output);
     }
@@ -157,7 +172,7 @@ class GitService
     /**
      * Get the diff for staged changes.
      *
-     * @param list<string> $paths Limit to specific file paths
+     * @param  list<string>  $paths  Limit to specific file paths
      * @return list<DiffFile>
      */
     public function getStagedDiff(array $paths = []): array
@@ -173,7 +188,7 @@ class GitService
     /**
      * Get the diff for unstaged (working tree) changes.
      *
-     * @param list<string> $paths Limit to specific file paths
+     * @param  list<string>  $paths  Limit to specific file paths
      * @return list<DiffFile>
      */
     public function getUnstagedDiff(array $paths = []): array
@@ -195,7 +210,7 @@ class GitService
     {
         $this->ensureOpen();
 
-        $result = $this->commandRunner->run(['diff', $commitHash . '^!'], timeout: 60);
+        $result = $this->commandRunner->run(['diff', $commitHash.'^!'], timeout: 60);
         $result->throw("Failed to get diff for commit {$commitHash}");
 
         return $this->diffParser->parse($result->output);
@@ -213,7 +228,7 @@ class GitService
     {
         $this->ensureOpen();
 
-        $result = $this->commandRunner->run(['diff', $baseRef . '...' . $ref], timeout: 60);
+        $result = $this->commandRunner->run(['diff', $baseRef.'...'.$ref], timeout: 60);
         $result->throw("Failed to get diff for ref {$ref}");
 
         return $this->diffParser->parse($result->output);
@@ -332,7 +347,7 @@ class GitService
     /**
      * Stage one or more files.
      *
-     * @param list<string> $paths File paths relative to repo root
+     * @param  list<string>  $paths  File paths relative to repo root
      */
     public function stage(array $paths): GitResult
     {
@@ -362,7 +377,7 @@ class GitService
     /**
      * Unstage one or more files (reset from index).
      *
-     * @param list<string> $paths File paths relative to repo root
+     * @param  list<string>  $paths  File paths relative to repo root
      */
     public function unstage(array $paths): GitResult
     {
@@ -392,7 +407,7 @@ class GitService
     /**
      * Discard working tree changes for specific files.
      *
-     * @param list<string> $paths File paths relative to repo root
+     * @param  list<string>  $paths  File paths relative to repo root
      */
     public function discardChanges(array $paths): GitResult
     {
@@ -519,6 +534,55 @@ class GitService
     }
 
     /**
+     * Determine whether a local branch can advance to a remote-tracking ref
+     * without discarding local commits.
+     */
+    public function canFastForward(string $localBranch, string $remoteRef): bool
+    {
+        $this->ensureOpen();
+
+        return $this->commandRunner
+            ->run(['merge-base', '--is-ancestor', $localBranch, $remoteRef])
+            ->success;
+    }
+
+    /**
+     * Switch to a local branch and advance it to the remote-tracking ref
+     * without creating a merge commit.
+     */
+    public function checkoutAndFastForward(string $localBranch, string $remoteRef): GitResult
+    {
+        $this->ensureOpen();
+
+        if (! $this->canFastForward($localBranch, $remoteRef)) {
+            throw new \RuntimeException("'{$localBranch}' cannot be fast-forwarded to '{$remoteRef}'.");
+        }
+
+        $this->checkout($localBranch);
+
+        $result = $this->commandRunner->runWithTranslation(['merge', '--ff-only', $remoteRef], timeout: 120);
+        $result->throw("Failed to fast-forward '{$localBranch}' to '{$remoteRef}'");
+
+        return $result;
+    }
+
+    /**
+     * Switch to a local branch and replace its tip and working tree with the
+     * remote-tracking ref. Callers must obtain explicit user confirmation.
+     */
+    public function checkoutAndResetToRemote(string $localBranch, string $remoteRef): GitResult
+    {
+        $this->ensureOpen();
+
+        $this->checkout($localBranch);
+
+        $result = $this->commandRunner->runWithTranslation(['reset', '--hard', $remoteRef], timeout: 120);
+        $result->throw("Failed to reset '{$localBranch}' to '{$remoteRef}'");
+
+        return $result;
+    }
+
+    /**
      * Create and switch to a new branch.
      */
     public function checkoutNewBranch(string $name, ?string $startPoint = null): GitResult
@@ -550,7 +614,7 @@ class GitService
     /**
      * Delete a local branch.
      *
-     * @param bool $force Force-delete even if not fully merged (uses -D)
+     * @param  bool  $force  Force-delete even if not fully merged (uses -D)
      */
     public function deleteBranch(string $name, bool $force = false): GitResult
     {
@@ -588,8 +652,7 @@ class GitService
         string $name,
         bool $forceLocal = false,
         ?string $confirmedRemoteRef = null,
-    ): GitResult
-    {
+    ): GitResult {
         $this->ensureOpen();
 
         $branches = $this->getBranches();
@@ -631,6 +694,7 @@ class GitService
         }
 
         $result = $this->commandRunner->runWithTranslation($args);
+
         // Don't throw on merge conflicts — the caller should check the result
         return $result;
     }
@@ -830,6 +894,7 @@ class GitService
         $this->ensureOpen();
 
         $result = $this->commandRunner->runWithTranslation(['stash', 'apply', $ref]);
+
         // Don't throw — may result in conflicts that the caller should handle
         return $result;
     }
@@ -842,6 +907,7 @@ class GitService
         $this->ensureOpen();
 
         $result = $this->commandRunner->runWithTranslation(['stash', 'pop', $ref]);
+
         // Don't throw — may result in conflicts
         return $result;
     }
@@ -896,6 +962,7 @@ class GitService
         }
 
         $result = $this->commandRunner->runWithTranslation($args, timeout: 120);
+
         // Don't throw — may result in merge conflicts
         return $result;
     }
@@ -999,7 +1066,7 @@ class GitService
     }
 
     /**
-     * @param list<Branch> $branches
+     * @param  list<Branch>  $branches
      */
     private function resolveRemoteBranchRef(string $name, array $branches): ?string
     {

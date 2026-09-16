@@ -9,6 +9,8 @@ use App\DTOs\DiffHunk;
 use App\DTOs\DiffLine;
 use App\DTOs\GitResult;
 use App\DTOs\RepoState;
+use App\DTOs\StashEntry;
+use App\DTOs\Tag;
 use App\Livewire\RepoView;
 use App\Services\Git\GitService;
 use Carbon\CarbonImmutable;
@@ -232,8 +234,12 @@ class RepoViewTest extends TestCase
             'tabId' => 'tab-1',
             'isActive' => true,
         ])
+            ->set('focusedHistoryRef', 'origin/feature/test')
+            ->set('historyLimit', 400)
             ->call('checkoutWorkspaceBranch', 'feature/test')
             ->assertSet('errorMessage', '')
+            ->assertSet('focusedHistoryRef', null)
+            ->assertSet('historyLimit', 200)
             ->assertDispatched('toast', message: "Switched to 'feature/test'", type: 'success');
     }
 
@@ -262,6 +268,151 @@ class RepoViewTest extends TestCase
             ->assertDispatched('toast', message: "Switched to 'feature/test'", type: 'success');
     }
 
+    public function test_remote_checkout_fetches_then_offers_safe_update_choices_for_an_existing_local_branch(): void
+    {
+        $git = $this->bindSelectableGitServiceMock();
+        $git->shouldReceive('fetch')->once()->andReturn(new GitResult(
+            success: true,
+            output: '',
+            error: '',
+            exitCode: 0,
+            command: 'git fetch origin --prune',
+        ));
+        $git->shouldReceive('canFastForward')
+            ->once()
+            ->with('feature/test', 'origin/feature/test')
+            ->andReturn(true);
+
+        Livewire::test(RepoView::class, [
+            'path' => '/fake/repo',
+            'tabId' => 'tab-1',
+            'isActive' => true,
+        ])
+            ->call('requestRemoteCheckout', 'origin/feature/test')
+            ->assertSet('showRemoteCheckoutOptions', true)
+            ->assertSet('remoteCheckoutLocal', 'feature/test')
+            ->assertSet('remoteCheckoutRemote', 'origin/feature/test')
+            ->assertSet('remoteCheckoutCanFastForward', true)
+            ->assertSee('Check out local branch')
+            ->assertSee('Fast-forward local branch, then check out')
+            ->assertSee('Reset local branch to remote, then check out');
+    }
+
+    public function test_focus_graph_loads_history_reachable_from_the_selected_branch(): void
+    {
+        $git = $this->bindSelectableGitServiceMock();
+        $focusedCommit = new Commit(
+            hash: 'def567812345',
+            shortHash: 'def5678',
+            parents: [],
+            author: 'Test User',
+            email: 'test@example.com',
+            date: CarbonImmutable::parse('2026-04-01T12:00:00Z'),
+            message: 'Old feature commit',
+            refs: ['origin/feature/test'],
+        );
+        $git->shouldReceive('getLogForRef')
+            ->once()
+            ->with('origin/feature/test', 200)
+            ->andReturn([$focusedCommit]);
+
+        Livewire::test(RepoView::class, [
+            'path' => '/fake/repo',
+            'tabId' => 'tab-1',
+            'isActive' => true,
+        ])
+            ->call('focusGraphOnBranch', 'origin/feature/test')
+            ->assertSet('focusedHistoryRef', 'origin/feature/test')
+            ->assertSet('historyLimit', 200)
+            ->assertSet('commits.0.hash', 'def567812345')
+            ->assertDispatched('target-current-branch', hash: 'def567812345');
+    }
+
+    public function test_reveal_branch_in_all_history_expands_in_batches_until_its_tip_is_visible(): void
+    {
+        $git = $this->bindSelectableGitServiceMock();
+        $oldCommit = new Commit(
+            hash: 'def567812345',
+            shortHash: 'def5678',
+            parents: [],
+            author: 'Test User',
+            email: 'test@example.com',
+            date: CarbonImmutable::parse('2026-03-01T12:00:00Z'),
+            message: 'Old feature commit',
+            refs: ['origin/feature/test'],
+        );
+        $git->shouldReceive('getLog')
+            ->with(400, true)
+            ->once()
+            ->andReturn([
+                new Commit(
+                    hash: 'abc123456789',
+                    shortHash: 'abc1234',
+                    parents: [],
+                    author: 'Test User',
+                    email: 'test@example.com',
+                    date: CarbonImmutable::parse('2026-04-01T12:00:00Z'),
+                    message: 'Initial commit',
+                    refs: ['HEAD -> main'],
+                ),
+                $oldCommit,
+            ]);
+
+        Livewire::test(RepoView::class, [
+            'path' => '/fake/repo',
+            'tabId' => 'tab-1',
+            'isActive' => true,
+        ])
+            ->call('revealBranchInAllHistory', 'origin/feature/test')
+            ->assertSet('focusedHistoryRef', null)
+            ->assertSet('historyLimit', 400)
+            ->assertSet('commits.1.hash', 'def567812345')
+            ->assertDispatched('target-current-branch', hash: 'def567812345')
+            ->assertDispatched('toast', message: "Revealed 'origin/feature/test' in 400 commits", type: 'success');
+    }
+
+    public function test_target_current_checkout_expands_history_when_the_checked_out_commit_is_old(): void
+    {
+        $git = $this->bindSelectableGitServiceMock();
+        $oldCommit = new Commit(
+            hash: 'def567812345',
+            shortHash: 'def5678',
+            parents: [],
+            author: 'Test User',
+            email: 'test@example.com',
+            date: CarbonImmutable::parse('2026-03-01T12:00:00Z'),
+            message: 'Old feature commit',
+            refs: ['origin/feature/test'],
+        );
+        $git->shouldReceive('getLog')
+            ->with(400, true)
+            ->once()
+            ->andReturn([
+                new Commit(
+                    hash: 'abc123456789',
+                    shortHash: 'abc1234',
+                    parents: [],
+                    author: 'Test User',
+                    email: 'test@example.com',
+                    date: CarbonImmutable::parse('2026-04-01T12:00:00Z'),
+                    message: 'Initial commit',
+                    refs: ['HEAD -> main'],
+                ),
+                $oldCommit,
+            ]);
+
+        Livewire::test(RepoView::class, [
+            'path' => '/fake/repo',
+            'tabId' => 'tab-1',
+            'isActive' => true,
+        ])
+            ->set('status.headHash', 'def5678')
+            ->call('targetCurrentCheckout')
+            ->assertSet('historyLimit', 400)
+            ->assertSet('commits.1.hash', 'def567812345')
+            ->assertDispatched('target-current-branch', hash: 'def567812345');
+    }
+
     public function test_graph_branch_badge_defers_selection_and_handles_double_click_client_side(): void
     {
         $this->bindSelectableGitServiceMock();
@@ -275,6 +426,128 @@ class RepoViewTest extends TestCase
         $this->assertStringContainsString('x-on:click.stop="handleGraphRefClick(', $html);
         $this->assertStringContainsString('x-on:dblclick.stop.prevent="handleGraphRefDoubleClick(', $html);
         $this->assertStringNotContainsString('wire:dblclick.stop="checkoutGraphRef(', $html);
+    }
+
+    public function test_repository_layout_renders_a_resizer_for_every_column_boundary(): void
+    {
+        $this->bindSelectableGitServiceMock();
+
+        $html = Livewire::test(RepoView::class, [
+            'path' => '/fake/repo',
+            'tabId' => 'tab-1',
+            'isActive' => true,
+        ])->html();
+
+        $this->assertStringContainsString('data-resize-handle="filter-panel"', $html);
+        $this->assertStringContainsString('data-resize-handle="branch-column"', $html);
+        $this->assertStringContainsString('data-resize-handle="graph-column"', $html);
+        $this->assertStringContainsString('data-resize-handle="detail-panel"', $html);
+        $this->assertStringContainsString("'width:' + filterPanelWidth + 'px'", $html);
+        $this->assertStringContainsString("'width:' + detailPanelWidth + 'px'", $html);
+    }
+
+    public function test_reference_filter_has_a_progress_indicator_and_zero_counts_by_default(): void
+    {
+        $this->bindSelectableGitServiceMock();
+
+        $html = Livewire::test(RepoView::class, [
+            'path' => '/fake/repo',
+            'tabId' => 'tab-1',
+            'isActive' => true,
+        ])->html();
+
+        $this->assertStringContainsString('wire:model.live.debounce.300ms="referenceFilter"', $html);
+        $this->assertStringContainsString('data-reference-filter-progress', $html);
+        $this->assertStringContainsString('wire:target="referenceFilter"', $html);
+
+        foreach (['local', 'remote', 'stashes', 'tags'] as $type) {
+            $this->assertMatchesRegularExpression(
+                '/data-reference-count="'.preg_quote($type, '/').'"[^>]*>\s*0\s*<\/span>/',
+                $html,
+            );
+        }
+    }
+
+    public function test_reference_filter_finds_prefix_matches_outside_the_bounded_sidebar_snapshot(): void
+    {
+        $state = new RepoState(
+            headHash: 'abc1234',
+            branch: 'main',
+            upstream: 'origin/main',
+            ahead: 0,
+            behind: 0,
+            isDetached: false,
+            files: [],
+        );
+        $commit = new Commit(
+            hash: 'abc123456789',
+            shortHash: 'abc1234',
+            parents: [],
+            author: 'Test User',
+            email: 'test@example.com',
+            date: CarbonImmutable::parse('2026-04-01T12:00:00Z'),
+            message: 'Initial commit',
+            refs: ['HEAD -> main'],
+        );
+
+        $branches = [new Branch('main', 'abc1234', true, false, 'origin/main')];
+        foreach (range(1, 500) as $index) {
+            $branches[] = new Branch("feature/{$index}", 'def5678');
+        }
+        $branches[] = new Branch('DEV-90-feature', 'def5678', false, false, 'origin/DEV-90-feature');
+
+        foreach (range(1, 500) as $index) {
+            $branches[] = new Branch("origin/feature/{$index}", 'def5678', false, true);
+        }
+        $branches[] = new Branch('origin/DEV-90-feature', 'def5678', false, true);
+
+        $tags = [
+            new Tag('DEV-90-release', 'def5678'),
+            new Tag('release-DEV-90', 'def5678'),
+        ];
+        $stashes = [
+            new StashEntry('stash@{0}', 'def5678', 'DEV-90 work'),
+            new StashEntry('stash@{1}', 'def5678', 'other work'),
+        ];
+
+        $git = Mockery::mock(GitService::class);
+        $git->shouldReceive('open')->times(3)->with('/fake/repo')->andReturnSelf();
+        $git->shouldReceive('getStatus')->once()->andReturn($state);
+        $git->shouldReceive('getOperationState')->once()->andReturnNull();
+        $git->shouldReceive('getLog')->once()->with(200, true)->andReturn([$commit]);
+        $git->shouldReceive('getBranches')->twice()->andReturn($branches);
+        $git->shouldReceive('getTags')->twice()->andReturn($tags);
+        $git->shouldReceive('getStashes')->twice()->andReturn($stashes);
+        $git->shouldReceive('getRefComparisonFiles')->once()->with('DEV-90-feature')->andReturn([]);
+        $this->app->instance(GitService::class, $git);
+
+        $component = Livewire::test(RepoView::class, [
+            'path' => '/fake/repo',
+            'tabId' => 'tab-1',
+            'isActive' => true,
+        ]);
+
+        $this->assertNotContains('DEV-90-feature', array_column($component->get('localBranches'), 'name'));
+        $this->assertNotContains('origin/DEV-90-feature', array_column($component->get('remoteBranches'), 'name'));
+
+        $component->set('referenceFilter', 'dev-90');
+
+        $this->assertSame(['DEV-90-feature'], array_column($component->get('filteredLocalBranches'), 'name'));
+        $this->assertSame(['origin/DEV-90-feature'], array_column($component->get('filteredRemoteBranches'), 'name'));
+        $this->assertSame(['DEV-90-release'], array_column($component->get('filteredTags'), 'name'));
+        $this->assertSame(['stash@{0}'], array_column($component->get('filteredStashes'), 'ref'));
+
+        $component
+            ->call('selectBranch', 'DEV-90-feature')
+            ->assertSet('selectedBranch', 'DEV-90-feature');
+
+        $html = $component->html();
+        foreach (['local', 'remote', 'stashes', 'tags'] as $type) {
+            $this->assertMatchesRegularExpression(
+                '/data-reference-count="'.preg_quote($type, '/').'"[^>]*>\s*1\s*<\/span>/',
+                $html,
+            );
+        }
     }
 
     public function test_sidebar_branch_rows_defer_single_click_before_checkout(): void

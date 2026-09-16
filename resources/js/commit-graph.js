@@ -218,7 +218,9 @@ export function drawGraph(ctx, nodes, opts = {}) {
     const cy = (row) => row * rowHeight + rowHeight / 2;
 
     // Draw edges first (behind nodes)
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = 3;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
     for (const node of nodes) {
         for (const edge of node.edges) {
             if (edge.toRow === null) continue;

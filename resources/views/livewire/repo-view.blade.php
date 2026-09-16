@@ -61,7 +61,18 @@
     "
     @target-current-branch.window="targetCurrentCommit($event.detail.hash)"
 >
-    <aside class="flex w-[17.5rem] shrink-0 flex-col overflow-hidden border-r border-[#343944] bg-[#292d36]">
+    @php
+        $hasReferenceFilter = trim($referenceFilter) !== '';
+        $visibleLocalBranches = $hasReferenceFilter ? $filteredLocalBranches : $localBranches;
+        $visibleRemoteBranches = $hasReferenceFilter ? $filteredRemoteBranches : $remoteBranches;
+        $visibleStashes = $hasReferenceFilter ? $filteredStashes : $stashes;
+        $visibleTags = $hasReferenceFilter ? $filteredTags : $tags;
+    @endphp
+
+    <aside
+        class="flex shrink-0 flex-col overflow-hidden bg-[#292d36]"
+        :style="'width:' + filterPanelWidth + 'px'"
+    >
         <div class="border-b border-[#3b404b] px-3 py-3">
             <div class="flex items-center justify-between gap-3 text-sm font-medium text-gray-200">
                 <div class="flex items-center gap-2">
@@ -75,14 +86,27 @@
 
             <div class="relative mt-3">
                 <input
-                    x-model.live="referenceFilter"
+                    wire:model.live.debounce.300ms="referenceFilter"
                     type="text"
                     placeholder="Filter (⌘ + Option + F)"
                     class="w-full rounded-md border border-[#3b404b] bg-[#21252d] px-3 py-2 pr-9 text-sm text-gray-200 placeholder:text-gray-500 focus:border-violet-600 focus:outline-none"
                 >
-                <svg class="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <svg wire:loading.remove wire:target="referenceFilter" class="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35m1.85-5.15a7 7 0 11-14 0 7 7 0 0114 0z"/>
                 </svg>
+                <span
+                    wire:loading
+                    wire:target="referenceFilter"
+                    data-reference-filter-progress
+                    role="status"
+                    class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-violet-400"
+                >
+                    <svg class="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                        <circle class="opacity-25" cx="12" cy="12" r="9" stroke="currentColor" stroke-width="3"></circle>
+                        <path class="opacity-90" fill="currentColor" d="M12 3a9 9 0 00-9 9h3a6 6 0 016-6V3z"></path>
+                    </svg>
+                    <span class="sr-only">Filtering references…</span>
+                </span>
             </div>
         </div>
 
@@ -217,15 +241,14 @@
                             <path stroke-linecap="round" stroke-linejoin="round" d="M3 5h18M7 5v14m10-14v14M5 19h14"/>
                         </svg>
                         <span class="flex-1 text-xs font-semibold uppercase tracking-[0.12em] text-gray-300">Local</span>
-                        <span class="text-sm font-semibold leading-none text-[#9fb3ff]">{{ count($localBranches) }}</span>
+                        <span data-reference-count="local" class="text-sm font-semibold leading-none text-[#9fb3ff]">{{ count($filteredLocalBranches) }}</span>
                     </button>
 
                     <div x-show="referenceSections.local" x-collapse class="border-t border-[#343944] bg-[#232730] px-2 py-2">
-                        @forelse ($localBranches as $branch)
+                        @forelse ($visibleLocalBranches as $branch)
                             <div
                                 x-on:click="handleBranchClick(@js($branch['name']))"
                                 @if (! $branch['isCurrent']) x-on:dblclick.stop.prevent="handleBranchDoubleClick(@js($branch['name']), false)" @endif
-                                x-show="matchesReference(@js($branch['name']))"
                                 class="group mb-1 rounded-md border px-2 py-1.5 text-xs transition-colors cursor-pointer {{ $selectedHistoryType === 'branch' && $selectedBranch === $branch['name'] ? 'border-violet-600/40 bg-violet-900/25 text-gray-100' : ($branch['isCurrent'] ? 'border-violet-700/30 bg-violet-900/20 text-gray-100 hover:bg-violet-900/25' : 'border-transparent text-gray-400 hover:bg-[#1a1f27] hover:text-gray-300') }}"
                                 title="{{ $branch['isCurrent'] ? 'Click to inspect this branch' : 'Click to inspect this branch. Double-click to switch branches.' }}"
                             >
@@ -289,7 +312,7 @@
                                 </div>
                             </div>
                         @empty
-                            <div class="px-2 py-3 text-xs italic text-gray-600">No local branches</div>
+                            <div class="px-2 py-3 text-xs italic text-gray-600">{{ $hasReferenceFilter ? 'No matching local branches' : 'No local branches' }}</div>
                         @endforelse
                     </div>
                 </div>
@@ -314,17 +337,16 @@
                             <path stroke-linecap="round" stroke-linejoin="round" d="M3 15a4 4 0 014-4h9a5 5 0 010 10H7a4 4 0 01-4-4 4 4 0 014-4m0 0V9a4 4 0 118 0v2"/>
                         </svg>
                         <span class="flex-1 text-xs font-semibold uppercase tracking-[0.12em] text-gray-300">Remote</span>
-                        <span class="text-sm font-semibold leading-none text-[#9fb3ff]">{{ count($remoteBranches) }}</span>
+                        <span data-reference-count="remote" class="text-sm font-semibold leading-none text-[#9fb3ff]">{{ count($filteredRemoteBranches) }}</span>
                     </button>
 
                     <div x-show="referenceSections.remote" x-collapse class="border-t border-[#343944] bg-[#232730] px-2 py-2">
-                        @forelse ($remoteBranches as $branch)
+                        @forelse ($visibleRemoteBranches as $branch)
                             <div
                                 x-on:click="handleBranchClick(@js($branch['name']))"
                                 x-on:dblclick.stop.prevent="handleBranchDoubleClick(@js($branch['name']), true)"
-                                x-show="matchesReference(@js($branch['name']))"
                                 class="group mb-1 rounded-md border px-2 py-1.5 text-xs transition-colors cursor-pointer {{ $selectedHistoryType === 'branch' && $selectedBranch === $branch['name'] ? 'border-violet-600/40 bg-violet-900/25 text-gray-200' : 'border-transparent text-gray-500 hover:bg-[#1a1f27] hover:text-gray-300' }}"
-                                title="Click to inspect this branch. Double-click to checkout a local tracking branch."
+                                title="Click to inspect this branch. Double-click to fetch it, then choose how to update the local branch."
                             >
                                 <div class="flex items-center gap-1.5">
                                     <svg class="h-3 w-3 shrink-0 text-gray-600" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -344,7 +366,7 @@
                                 </div>
                             </div>
                         @empty
-                            <div class="px-2 py-3 text-xs italic text-gray-600">No remote branches</div>
+                            <div class="px-2 py-3 text-xs italic text-gray-600">{{ $hasReferenceFilter ? 'No matching remote branches' : 'No remote branches' }}</div>
                         @endforelse
                     </div>
                 </div>
@@ -369,7 +391,7 @@
                             <path stroke-linecap="round" stroke-linejoin="round" d="M20 7L4 7m16 0l-2 10H6L4 7m4 0V5a2 2 0 012-2h4a2 2 0 012 2v2"/>
                         </svg>
                         <span class="flex-1 text-xs font-semibold uppercase tracking-[0.12em] text-gray-300">Stashes</span>
-                        <span class="text-sm font-semibold leading-none text-[#9fb3ff]">{{ count($stashes) }}</span>
+                        <span data-reference-count="stashes" class="text-sm font-semibold leading-none text-[#9fb3ff]">{{ count($filteredStashes) }}</span>
                     </button>
 
                     <div x-show="referenceSections.stashes" x-collapse class="border-t border-[#343944] bg-[#232730] py-2">
@@ -413,8 +435,8 @@
                             @endif
                         </div>
 
-                        @forelse ($stashes as $stash)
-                            <div x-show="matchesReference(@js($stash['ref'] . ' ' . $stash['message']))" class="group px-3 py-1.5 text-xs text-gray-400 transition-colors hover:bg-[#1a1f27]">
+                        @forelse ($visibleStashes as $stash)
+                            <div class="group px-3 py-1.5 text-xs text-gray-400 transition-colors hover:bg-[#1a1f27]">
                                 <div class="flex items-center gap-1.5">
                                     <span class="font-mono text-gray-500">{{ $stash['ref'] }}</span>
                                     <div class="ml-auto flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
@@ -445,7 +467,7 @@
                                 <div class="mt-0.5 truncate text-gray-500">{{ $stash['message'] }}</div>
                             </div>
                         @empty
-                            <div class="px-3 py-4 text-center text-xs italic text-gray-600">No stashes</div>
+                            <div class="px-3 py-4 text-center text-xs italic text-gray-600">{{ $hasReferenceFilter ? 'No matching stashes' : 'No stashes' }}</div>
                         @endforelse
                     </div>
                 </div>
@@ -470,7 +492,7 @@
                             <path stroke-linecap="round" stroke-linejoin="round" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A2 2 0 013 12V7a4 4 0 014-4z"/>
                         </svg>
                         <span class="flex-1 text-xs font-semibold uppercase tracking-[0.12em] text-gray-300">Tags</span>
-                        <span class="text-sm font-semibold leading-none text-[#9fb3ff]">{{ count($tags) }}</span>
+                        <span data-reference-count="tags" class="text-sm font-semibold leading-none text-[#9fb3ff]">{{ count($filteredTags) }}</span>
                     </button>
 
                     <div x-show="referenceSections.tags" x-collapse class="border-t border-[#343944] bg-[#232730] py-2">
@@ -549,8 +571,8 @@
                             @endif
                         </div>
 
-                        @forelse ($tags as $tag)
-                            <div x-show="matchesReference(@js($tag['name']))" class="group flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-400 transition-colors hover:bg-[#1a1f27]">
+                        @forelse ($visibleTags as $tag)
+                            <div class="group flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-400 transition-colors hover:bg-[#1a1f27]">
                                 <svg class="h-3 w-3 shrink-0 {{ $tag['isAnnotated'] ? 'text-teal-500' : 'text-gray-600' }}" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A2 2 0 013 12V7a4 4 0 014-4z"/>
                                 </svg>
@@ -589,13 +611,30 @@
                                 </div>
                             </div>
                         @empty
-                            <div class="px-3 py-4 text-center text-xs italic text-gray-600">No tags</div>
+                            <div class="px-3 py-4 text-center text-xs italic text-gray-600">{{ $hasReferenceFilter ? 'No matching tags' : 'No tags' }}</div>
                         @endforelse
                     </div>
                 </div>
             </div>
         </div>
     </aside>
+
+    <div
+        data-resize-handle="filter-panel"
+        x-on:mousedown.prevent="startWidthResize($event, 'filterPanelWidth')"
+        x-on:keydown="resizeWidthFromKeyboard($event, 'filterPanelWidth')"
+        x-bind:aria-valuenow="filterPanelWidth"
+        aria-valuemin="180"
+        aria-valuemax="480"
+        aria-label="Resize filter panel"
+        aria-orientation="vertical"
+        role="separator"
+        tabindex="0"
+        title="Resize filter panel"
+        class="group relative w-1 shrink-0 cursor-col-resize bg-[#343944] transition-colors hover:bg-violet-600 focus:bg-violet-600 focus:outline-none"
+    >
+        <div class="absolute inset-y-0 -left-1 -right-1"></div>
+    </div>
 
     <div class="flex-1 min-w-0 flex flex-col overflow-hidden">
         @if ($errorMessage)
@@ -625,7 +664,7 @@
                 $totalFileChanges = count($stagedFiles) + $unstagedTotal;
             @endphp
 
-            <div class="flex-1 min-h-0 flex overflow-hidden" x-data="repoLayout()">
+            <div class="flex-1 min-h-0 flex overflow-hidden">
                 <div class="flex-1 min-w-0 overflow-hidden bg-[#06060c]">
                     @if ($selectedFile)
                         <div class="flex h-full flex-col overflow-hidden">
@@ -736,20 +775,73 @@
                             x-effect="$wire.commits; $wire.selectedCommit; updateGraph()"
                             wire:ignore.self
                         >
+                            @if ($focusedHistoryRef !== null || $historyLimit > 200)
+                                <div class="sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-cyan-800/40 bg-cyan-950/30 px-4 py-2 text-xs text-cyan-200">
+                                    <span class="truncate">
+                                        @if ($focusedHistoryRef !== null)
+                                            Focused on {{ $focusedHistoryRef }}
+                                        @else
+                                            Showing the latest {{ $historyLimit }} commits from all refs
+                                        @endif
+                                    </span>
+                                    <button
+                                        wire:click="restoreDefaultHistory"
+                                        class="shrink-0 rounded border border-cyan-800/60 px-2 py-1 text-[10px] font-medium text-cyan-200 transition-colors hover:bg-cyan-900/50 cursor-pointer"
+                                    >
+                                        Back to latest history
+                                    </button>
+                                </div>
+                            @endif
                             @if (count($commits) > 0)
                                 <div
                                     class="sticky top-0 z-20 grid border-b border-[#353a46] bg-[#242933] text-[10px] font-medium uppercase tracking-[0.18em] text-gray-500"
-                                    :style="'grid-template-columns: 12rem ' + Math.max(graphWidth, graphColumnWidth) + 'px minmax(0,1fr);'"
+                                    :style="'grid-template-columns:' + gridTemplateColumns()"
                                 >
-                                    <div class="border-r border-[#1e1e32] px-4 py-2">Branch / Tag</div>
-                                    <div class="border-r border-[#1e1e32] px-4 py-2">Graph</div>
+                                    <div class="relative border-r border-[#1e1e32] px-4 py-2">
+                                        Branch / Tag
+                                        <div
+                                            data-resize-handle="branch-column"
+                                            x-on:mousedown.prevent.stop="startWidthResize($event, 'branchColumnWidth')"
+                                            x-on:keydown.stop="resizeWidthFromKeyboard($event, 'branchColumnWidth')"
+                                            x-bind:aria-valuenow="branchColumnWidth"
+                                            aria-valuemin="120"
+                                            aria-valuemax="480"
+                                            aria-label="Resize Branch and Tag column"
+                                            aria-orientation="vertical"
+                                            role="separator"
+                                            tabindex="0"
+                                            title="Resize Branch / Tag column"
+                                            class="group absolute inset-y-0 -right-1 z-30 w-2 cursor-col-resize focus:outline-none"
+                                        >
+                                            <div class="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent transition-colors group-hover:bg-violet-500 group-focus:bg-violet-500"></div>
+                                        </div>
+                                    </div>
+                                    <div class="relative border-r border-[#1e1e32] px-4 py-2">
+                                        Graph
+                                        <div
+                                            data-resize-handle="graph-column"
+                                            x-on:mousedown.prevent.stop="startWidthResize($event, 'graphColumnWidth', 1, graphWidth)"
+                                            x-on:keydown.stop="resizeWidthFromKeyboard($event, 'graphColumnWidth', 1, graphWidth)"
+                                            x-bind:aria-valuenow="Math.max(graphWidth, graphColumnWidth)"
+                                            x-bind:aria-valuemin="Math.max(72, graphWidth)"
+                                            x-bind:aria-valuemax="Math.max(640, graphWidth)"
+                                            aria-label="Resize Graph column"
+                                            aria-orientation="vertical"
+                                            role="separator"
+                                            tabindex="0"
+                                            title="Resize Graph column"
+                                            class="group absolute inset-y-0 -right-1 z-30 w-2 cursor-col-resize focus:outline-none"
+                                        >
+                                            <div class="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent transition-colors group-hover:bg-violet-500 group-focus:bg-violet-500"></div>
+                                        </div>
+                                    </div>
                                     <div class="px-4 py-2">Commit Message</div>
                                 </div>
 
                                 <div class="relative text-xs font-mono">
                                     <div
                                         class="pointer-events-none absolute inset-y-0"
-                                        :style="'left: 12rem; width: ' + Math.max(graphWidth, graphColumnWidth) + 'px;'"
+                                        :style="'left:' + branchColumnWidth + 'px; width:' + Math.max(graphWidth, graphColumnWidth) + 'px;'"
                                     >
                                         <canvas x-ref="graphCanvas" wire:ignore class="absolute top-0 left-0"></canvas>
                                     </div>
@@ -766,7 +858,7 @@
                                             data-history-context-menu-trigger
                                             class="grid h-10 cursor-pointer items-stretch border-b border-[#232833] transition-colors hover:bg-[#202531] {{ $selectedHistoryType === 'commit' && $selectedCommit === $commit['hash'] ? 'bg-violet-900/20' : '' }}"
                                             :class="{ 'ring-1 ring-inset ring-violet-400 bg-violet-900/30': targetedCommitHash === @js($commit['hash']) }"
-                                            :style="'grid-template-columns: 12rem ' + Math.max(graphWidth, graphColumnWidth) + 'px minmax(0,1fr);'"
+                                            :style="'grid-template-columns:' + gridTemplateColumns()"
                                             title="Click to inspect changed files. Double-click to checkout this commit."
                                         >
                                             <div class="flex min-w-0 items-center overflow-hidden border-r border-[#1e1e32] {{ $commitHasRefs ? 'px-3 py-1.5' : 'px-2.5 py-1' }}">
@@ -852,15 +944,25 @@
                 </div>
 
                 <div
-                    @mousedown.prevent="startSidebarResize($event)"
-                    class="group relative w-1 shrink-0 cursor-col-resize bg-[#1e1e32] transition-colors hover:bg-violet-600"
+                    data-resize-handle="detail-panel"
+                    x-on:mousedown.prevent="startWidthResize($event, 'detailPanelWidth', -1)"
+                    x-on:keydown="resizeWidthFromKeyboard($event, 'detailPanelWidth', -1)"
+                    x-bind:aria-valuenow="detailPanelWidth"
+                    aria-valuemin="360"
+                    aria-valuemax="680"
+                    aria-label="Resize Commit Message and commit details panels"
+                    aria-orientation="vertical"
+                    role="separator"
+                    tabindex="0"
+                    title="Resize Commit Message / commit details"
+                    class="group relative w-1 shrink-0 cursor-col-resize bg-[#1e1e32] transition-colors hover:bg-violet-600 focus:bg-violet-600 focus:outline-none"
                 >
                     <div class="absolute inset-y-0 -left-1 -right-1 group-hover:bg-transparent"></div>
                 </div>
 
                 <aside
                     class="shrink-0 border-l border-[#1e1e32] bg-[#0a0a12] flex flex-col overflow-hidden"
-                    :style="'width:' + sidebarWidth + 'px'"
+                    :style="'width:' + detailPanelWidth + 'px'"
                 >
                     @if ($selectedHistoryType)
                         @php
@@ -936,6 +1038,20 @@
                                     </div>
                                     <div class="mt-3 text-sm text-gray-300">
                                         Showing changes relative to {{ $isDetached ? 'HEAD' : ($currentBranch ?? 'HEAD') }}
+                                    </div>
+                                    <div class="mt-3 flex flex-wrap gap-2">
+                                        <button
+                                            wire:click="focusGraphOnBranch(@js($selectedBranchData['name']))"
+                                            class="rounded border border-cyan-800/60 bg-cyan-900/20 px-2.5 py-1 text-xs font-medium text-cyan-200 transition-colors hover:bg-cyan-900/40 cursor-pointer"
+                                        >
+                                            Focus graph
+                                        </button>
+                                        <button
+                                            wire:click="revealBranchInAllHistory(@js($selectedBranchData['name']))"
+                                            class="rounded border border-[#3b404b] bg-[#1a1a2e] px-2.5 py-1 text-xs font-medium text-gray-300 transition-colors hover:bg-[#202035] hover:text-gray-100 cursor-pointer"
+                                        >
+                                            Reveal in all history
+                                        </button>
                                     </div>
                                 @endif
                             </div>
@@ -1280,6 +1396,70 @@
                 >
                     <span>Create annotated tag here</span>
                 </button>
+            </div>
+        </div>
+    @endif
+
+    @if ($showRemoteCheckoutOptions && $remoteCheckoutRemote && $remoteCheckoutLocal)
+        <div
+            x-cloak
+            wire:click.self="closeRemoteCheckoutOptions"
+            class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="remote-checkout-title"
+        >
+            <div class="w-full max-w-lg rounded-xl border border-[#3b404b] bg-[#161922] shadow-2xl shadow-black/60">
+                <div class="border-b border-[#2a2e38] px-5 py-4">
+                    <h2 id="remote-checkout-title" class="text-base font-semibold text-gray-100">Update local branch?</h2>
+                    <p class="mt-1 text-sm leading-relaxed text-gray-400">
+                        Treehouse fetched <span class="font-mono text-cyan-300">{{ $remoteCheckoutRemote }}</span>.
+                        Your local <span class="font-mono text-violet-300">{{ $remoteCheckoutLocal }}</span> already exists.
+                    </p>
+                </div>
+
+                <div class="space-y-3 px-5 py-4 text-sm text-gray-300">
+                    <button
+                        wire:click="checkoutExistingRemoteChoice"
+                        class="w-full rounded-lg border border-[#3b404b] bg-[#1d212b] px-4 py-3 text-left transition-colors hover:border-violet-700/60 hover:bg-[#242936] cursor-pointer"
+                    >
+                        <span class="block font-medium text-gray-100">Check out local branch</span>
+                        <span class="mt-1 block text-xs leading-relaxed text-gray-500">Keep its commits and working tree exactly as they are.</span>
+                    </button>
+
+                    <button
+                        wire:click="fastForwardRemoteChoice"
+                        @if (! $remoteCheckoutCanFastForward) disabled @endif
+                        class="w-full rounded-lg border px-4 py-3 text-left transition-colors {{ $remoteCheckoutCanFastForward ? 'border-cyan-800/60 bg-cyan-950/20 hover:bg-cyan-900/30 cursor-pointer' : 'cursor-not-allowed border-[#2a2e38] bg-[#1a1d25] opacity-55' }}"
+                    >
+                        <span class="block font-medium {{ $remoteCheckoutCanFastForward ? 'text-cyan-200' : 'text-gray-500' }}">Fast-forward local branch, then check out</span>
+                        <span class="mt-1 block text-xs leading-relaxed text-gray-500">
+                            @if ($remoteCheckoutCanFastForward)
+                                Advances safely to the fetched remote commit without a merge commit.
+                            @else
+                                Not available because the local and remote histories have diverged.
+                            @endif
+                        </span>
+                    </button>
+
+                    <button
+                        wire:click="resetRemoteCheckoutChoice"
+                        wire:confirm="Reset '{{ $remoteCheckoutLocal }}' to '{{ $remoteCheckoutRemote }}'? This permanently discards unpushed local commits and working-tree changes on that branch."
+                        class="w-full rounded-lg border border-red-800/60 bg-red-950/20 px-4 py-3 text-left transition-colors hover:bg-red-900/30 cursor-pointer"
+                    >
+                        <span class="block font-medium text-red-200">Reset local branch to remote, then check out</span>
+                        <span class="mt-1 block text-xs leading-relaxed text-red-300/70">Makes the local branch exactly match the fetched remote ref.</span>
+                    </button>
+                </div>
+
+                <div class="flex justify-end border-t border-[#2a2e38] px-5 py-3">
+                    <button
+                        wire:click="closeRemoteCheckoutOptions"
+                        class="rounded px-3 py-1.5 text-sm text-gray-400 transition-colors hover:bg-[#242936] hover:text-gray-200 cursor-pointer"
+                    >
+                        Cancel
+                    </button>
+                </div>
             </div>
         </div>
     @endif

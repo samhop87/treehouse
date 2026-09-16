@@ -21,6 +21,10 @@ class RepoView extends Component
 {
     private const HISTORY_LIMIT = 200;
 
+    private const HISTORY_BATCH_SIZE = 200;
+
+    private const MAX_HISTORY_LIMIT = 1600;
+
     private const MAX_BRANCHES_PER_KIND = 500;
 
     private const MAX_TAGS = 500;
@@ -62,10 +66,27 @@ class RepoView extends Component
     /** Commit log for the graph */
     public array $commits = [];
 
+    /** Number of newest commits loaded for the all-refs graph. */
+    public int $historyLimit = self::HISTORY_LIMIT;
+
+    /** A branch or remote ref whose history is shown instead of the all-refs graph. */
+    public ?string $focusedHistoryRef = null;
+
     /** Local and remote branches */
     public array $localBranches = [];
 
     public array $remoteBranches = [];
+
+    /** Server-filtered reference results. Empty until a filter is entered. */
+    public string $referenceFilter = '';
+
+    public array $filteredLocalBranches = [];
+
+    public array $filteredRemoteBranches = [];
+
+    public array $filteredTags = [];
+
+    public array $filteredStashes = [];
 
     public ?string $currentBranch = null;
 
@@ -138,6 +159,18 @@ class RepoView extends Component
 
     public ?array $contextMenuTarget = null;
 
+    /** Remote checkout choice shown after Treehouse has fetched remote state. */
+    public bool $showRemoteCheckoutOptions = false;
+
+    public ?string $remoteCheckoutRemote = null;
+
+    public ?string $remoteCheckoutLocal = null;
+
+    public bool $remoteCheckoutCanFastForward = false;
+
+    /** Remote ref to continue checking out after an asynchronous native fetch. */
+    public ?string $pendingRemoteCheckout = null;
+
     // ─── LIFECYCLE ───────────────────────────────────────────────────────
 
     public function mount(string $path, string $tabId, bool $isActive = false): void
@@ -178,8 +211,7 @@ class RepoView extends Component
             }
 
             // Load commits
-            $commits = $git->getLog(limit: self::HISTORY_LIMIT, all: true);
-            $this->commits = $this->serializeCommits($commits);
+            $this->loadGraphHistory($git);
 
             // Load branches
             $branches = $git->getBranches();
@@ -192,6 +224,7 @@ class RepoView extends Component
             // Load stashes
             $stashes = $git->getStashes();
             $this->stashes = $this->serializeStashes($stashes);
+            $this->hydrateFilteredReferences($branches, $tags, $stashes);
 
             // Keep selection state in sync after refreshes.
             if ($this->selectedHistoryType === 'commit' && $this->selectedCommit !== null) {
@@ -249,6 +282,30 @@ class RepoView extends Component
 
     private function hydrateBranches(array $branches): void
     {
+        [$this->localBranches, $this->remoteBranches] = $this->serializeBranchGroups($branches, true);
+    }
+
+    private function loadGraphHistory(GitService $git): void
+    {
+        if ($this->focusedHistoryRef !== null) {
+            $commits = $git->getLogForRef($this->focusedHistoryRef, self::HISTORY_LIMIT);
+            $this->commits = $this->serializeCommits($commits, self::HISTORY_LIMIT);
+
+            return;
+        }
+
+        $limit = min(self::MAX_HISTORY_LIMIT, max(self::HISTORY_LIMIT, $this->historyLimit));
+        $this->historyLimit = $limit;
+        $commits = $git->getLog(limit: $limit, all: true);
+        $this->commits = $this->serializeCommits($commits, $limit);
+    }
+
+    /**
+     * @param  list<Branch>  $branches
+     * @return array{0: list<array<string, mixed>>, 1: list<array<string, mixed>>}
+     */
+    private function serializeBranchGroups(array $branches, bool $bounded): array
+    {
         $localBranches = [];
         $remoteBranches = [];
 
@@ -271,15 +328,17 @@ class RepoView extends Component
             }
         }
 
-        $localBranches = $this->limitBranches($localBranches);
-        $remoteBranches = $this->limitBranches($remoteBranches);
+        if ($bounded) {
+            $localBranches = $this->limitBranches($localBranches);
+            $remoteBranches = $this->limitBranches($remoteBranches);
+        }
 
         $remoteByLocalName = collect($remoteBranches)
             ->mapWithKeys(fn (array $branch) => [$branch['localName'] => $branch['name']])
             ->all();
         $localNames = collect($localBranches)->pluck('name')->all();
 
-        $this->localBranches = array_map(function (array $branch) use ($remoteByLocalName) {
+        $localBranches = array_map(function (array $branch) use ($remoteByLocalName) {
             $pairedRemote = $branch['upstream'] ?: ($remoteByLocalName[$branch['localName']] ?? null);
 
             return array_merge($branch, [
@@ -289,13 +348,101 @@ class RepoView extends Component
             ]);
         }, $localBranches);
 
-        $this->remoteBranches = array_map(function (array $branch) use ($localNames) {
+        $remoteBranches = array_map(function (array $branch) use ($localNames) {
             return array_merge($branch, [
                 'pairedRemote' => $branch['name'],
                 'hasPairedRemote' => true,
                 'hasLocalPair' => in_array($branch['localName'], $localNames, true),
             ]);
         }, $remoteBranches);
+
+        return [$localBranches, $remoteBranches];
+    }
+
+    /**
+     * Re-query refs after the debounced filter changes so matches are not
+     * restricted to the bounded sidebar snapshot.
+     */
+    public function updatedReferenceFilter(): void
+    {
+        if (trim($this->referenceFilter) === '') {
+            $this->clearFilteredReferences();
+
+            return;
+        }
+
+        try {
+            $git = app(GitService::class);
+            $git->open($this->path);
+
+            $this->hydrateFilteredReferences(
+                $git->getBranches(),
+                $git->getTags(),
+                $git->getStashes(),
+            );
+        } catch (\RuntimeException $e) {
+            $this->clearFilteredReferences();
+            $this->errorMessage = $e->getMessage();
+        }
+    }
+
+    /**
+     * @param  list<Branch>  $branches
+     * @param  list<Tag>  $tags
+     * @param  list<StashEntry>  $stashes
+     */
+    private function hydrateFilteredReferences(array $branches, array $tags, array $stashes): void
+    {
+        $query = Str::lower(trim($this->referenceFilter));
+
+        if ($query === '') {
+            $this->clearFilteredReferences();
+
+            return;
+        }
+
+        $matchingBranches = array_values(array_filter(
+            $branches,
+            function (Branch $branch) use ($query): bool {
+                if ($this->startsWithReferenceFilter($branch->name, $query)) {
+                    return true;
+                }
+
+                return $branch->isRemote
+                    && $this->startsWithReferenceFilter($this->localBranchNameFromRemote($branch->name), $query);
+            },
+        ));
+
+        [$this->filteredLocalBranches, $this->filteredRemoteBranches] = $this->serializeBranchGroups(
+            $matchingBranches,
+            false,
+        );
+
+        $matchingTags = array_values(array_filter(
+            $tags,
+            fn (Tag $tag): bool => $this->startsWithReferenceFilter($tag->name, $query),
+        ));
+        $this->filteredTags = $this->serializeTags($matchingTags, false);
+
+        $matchingStashes = array_values(array_filter(
+            $stashes,
+            fn (StashEntry $stash): bool => $this->startsWithReferenceFilter($stash->ref, $query)
+                || $this->startsWithReferenceFilter($stash->message, $query),
+        ));
+        $this->filteredStashes = $this->serializeStashes($matchingStashes, false);
+    }
+
+    private function clearFilteredReferences(): void
+    {
+        $this->filteredLocalBranches = [];
+        $this->filteredRemoteBranches = [];
+        $this->filteredTags = [];
+        $this->filteredStashes = [];
+    }
+
+    private function startsWithReferenceFilter(string $value, string $query): bool
+    {
+        return str_starts_with(Str::lower($value), $query);
     }
 
     /**
@@ -371,16 +518,22 @@ class RepoView extends Component
     public function targetCurrentCheckout(): void
     {
         $headHash = (string) ($this->status['headHash'] ?? '');
-        $commitHash = collect($this->commits)
-            ->pluck('hash')
-            ->first(fn (string $hash): bool => $hash === $headHash
-                || ($headHash !== '' && str_starts_with($hash, $headHash))
-                || ($hash !== '' && str_starts_with($headHash, $hash)));
+        $commitHash = $this->loadedCommitHashFor($headHash);
+
+        if ($commitHash === null) {
+            try {
+                $commitHash = $this->expandAllHistoryUntil($headHash);
+            } catch (\RuntimeException $e) {
+                $this->errorMessage = $e->getMessage();
+
+                return;
+            }
+        }
 
         if ($commitHash === null) {
             $this->dispatch(
                 'toast',
-                message: 'The current checkout is outside the loaded history.',
+                message: 'The current checkout is older than the expanded graph history.',
                 type: 'error',
             );
 
@@ -389,6 +542,64 @@ class RepoView extends Component
 
         $this->clearFileSelection();
         $this->dispatch('target-current-branch', hash: $commitHash);
+    }
+
+    /** Show the history reachable from one local or remote branch. */
+    public function focusGraphOnBranch(string $name): void
+    {
+        $branch = $this->findBranchByName($name) ?? $this->findBranchInRepository($name);
+        if ($branch === null) {
+            $this->errorMessage = "Branch '{$name}' was not found.";
+
+            return;
+        }
+
+        $this->focusedHistoryRef = $branch['name'];
+        $this->historyLimit = self::HISTORY_LIMIT;
+        $this->loadRepoData();
+
+        $commitHash = $this->loadedCommitHashFor((string) $branch['hash']);
+        if ($commitHash !== null) {
+            $this->dispatch('target-current-branch', hash: $commitHash);
+        }
+    }
+
+    /**
+     * Expand the all-refs graph in bounded batches until a branch tip appears.
+     */
+    public function revealBranchInAllHistory(string $name): void
+    {
+        $branch = $this->findBranchByName($name) ?? $this->findBranchInRepository($name);
+        if ($branch === null) {
+            $this->errorMessage = "Branch '{$name}' was not found.";
+
+            return;
+        }
+
+        try {
+            $commitHash = $this->expandAllHistoryUntil((string) $branch['hash']);
+            if ($commitHash !== null) {
+                $this->dispatch('target-current-branch', hash: $commitHash);
+                $this->dispatch('toast', message: "Revealed '{$name}' in {$this->historyLimit} commits", type: 'success');
+
+                return;
+            }
+
+            $this->errorMessage = "'{$name}' is older than the ".self::MAX_HISTORY_LIMIT.'-commit all-history limit. Use Focus graph to view it.';
+        } catch (\RuntimeException $e) {
+            $this->errorMessage = $e->getMessage();
+        }
+    }
+
+    /** Restore the bounded, newest-first all-refs graph. */
+    public function restoreDefaultHistory(): void
+    {
+        if ($this->focusedHistoryRef === null && $this->historyLimit === self::HISTORY_LIMIT) {
+            return;
+        }
+
+        $this->resetGraphHistory();
+        $this->loadRepoData();
     }
 
     /**
@@ -456,7 +667,8 @@ class RepoView extends Component
 
         $this->runGitAction(
             fn (GitService $git) => $git->checkout($hash),
-            "Checked out commit {$shortHash}"
+            "Checked out commit {$shortHash}",
+            resetGraphHistory: true,
         );
     }
 
@@ -631,7 +843,7 @@ class RepoView extends Component
         }
 
         if ($branch['isRemote']) {
-            $this->checkoutRemoteBranch($branchName);
+            $this->requestRemoteCheckout($branchName);
 
             return;
         }
@@ -837,7 +1049,11 @@ class RepoView extends Component
      */
     public function checkoutLocalBranch(string $name): void
     {
-        $this->runGitAction(fn (GitService $git) => $git->checkout($name), "Switched to '{$name}'");
+        $this->runGitAction(
+            fn (GitService $git) => $git->checkout($name),
+            "Switched to '{$name}'",
+            resetGraphHistory: true,
+        );
     }
 
     /**
@@ -845,11 +1061,76 @@ class RepoView extends Component
      */
     public function checkoutRemoteBranch(string $name): void
     {
-        $localBranch = $this->localBranchNameFromRemote($name);
+        $this->requestRemoteCheckout($name);
+    }
+
+    /** Fetch a remote ref before choosing how its local tracking branch changes. */
+    public function requestRemoteCheckout(string $name): void
+    {
+        $branch = $this->findBranchByName($name) ?? $this->findBranchInRepository($name);
+        if ($branch === null || ! $branch['isRemote']) {
+            $this->errorMessage = "Remote branch '{$name}' was not found.";
+
+            return;
+        }
+
+        $this->pendingRemoteCheckout = $branch['name'];
+        $this->startFetch();
+    }
+
+    public function closeRemoteCheckoutOptions(): void
+    {
+        $this->showRemoteCheckoutOptions = false;
+        $this->remoteCheckoutRemote = null;
+        $this->remoteCheckoutLocal = null;
+        $this->remoteCheckoutCanFastForward = false;
+    }
+
+    /** Keep the existing local branch as-is and switch to it. */
+    public function checkoutExistingRemoteChoice(): void
+    {
+        $localBranch = $this->remoteCheckoutLocal;
+        $this->closeRemoteCheckoutOptions();
+
+        if ($localBranch !== null) {
+            $this->checkoutLocalBranch($localBranch);
+        }
+    }
+
+    /** Fast-forward the existing local branch to its freshly fetched remote ref. */
+    public function fastForwardRemoteChoice(): void
+    {
+        $localBranch = $this->remoteCheckoutLocal;
+        $remoteRef = $this->remoteCheckoutRemote;
+        $canFastForward = $this->remoteCheckoutCanFastForward;
+        $this->closeRemoteCheckoutOptions();
+
+        if ($localBranch === null || $remoteRef === null || ! $canFastForward) {
+            return;
+        }
 
         $this->runGitAction(
-            fn (GitService $git) => $git->checkoutRemoteBranch($name),
-            "Switched to '{$localBranch}'"
+            fn (GitService $git) => $git->checkoutAndFastForward($localBranch, $remoteRef),
+            "Fast-forwarded '{$localBranch}' to '{$remoteRef}'",
+            resetGraphHistory: true,
+        );
+    }
+
+    /** Replace the existing local branch with its freshly fetched remote ref. */
+    public function resetRemoteCheckoutChoice(): void
+    {
+        $localBranch = $this->remoteCheckoutLocal;
+        $remoteRef = $this->remoteCheckoutRemote;
+        $this->closeRemoteCheckoutOptions();
+
+        if ($localBranch === null || $remoteRef === null) {
+            return;
+        }
+
+        $this->runGitAction(
+            fn (GitService $git) => $git->checkoutAndResetToRemote($localBranch, $remoteRef),
+            "Reset '{$localBranch}' to '{$remoteRef}'",
+            resetGraphHistory: true,
         );
     }
 
@@ -903,7 +1184,7 @@ class RepoView extends Component
 
         $this->runGitAction(function (GitService $git) use ($name, $startPoint) {
             $git->checkoutNewBranch($name, $startPoint);
-        }, "Created and switched to '{$name}'");
+        }, "Created and switched to '{$name}'", resetGraphHistory: true);
 
         $this->showCreateBranch = false;
         $this->newBranchName = '';
@@ -1327,6 +1608,13 @@ class RepoView extends Component
      */
     public function fetchRemote(): void
     {
+        $this->pendingRemoteCheckout = null;
+        $this->startFetch();
+    }
+
+    /** Start a fetch, preserving any remote checkout request until it finishes. */
+    private function startFetch(): void
+    {
         $this->errorMessage = '';
 
         if ($this->remoteOperation !== null) {
@@ -1349,8 +1637,16 @@ class RepoView extends Component
                 $git->open($this->path);
                 $git->fetch();
                 $this->loadRepoData();
-                $this->dispatch('toast', message: 'Fetched from remote', type: 'success');
+
+                $pendingRemoteCheckout = $this->pendingRemoteCheckout;
+                $this->pendingRemoteCheckout = null;
+                if ($pendingRemoteCheckout !== null) {
+                    $this->openRemoteCheckoutOptions($pendingRemoteCheckout);
+                } else {
+                    $this->dispatch('toast', message: 'Fetched from remote', type: 'success');
+                }
             } catch (\RuntimeException $e) {
+                $this->pendingRemoteCheckout = null;
                 $this->errorMessage = $e->getMessage();
             }
         }
@@ -1450,6 +1746,8 @@ class RepoView extends Component
 
         $op = $this->remoteOperation;
         $errorOutput = trim($this->remoteErrorOutput);
+        $pendingRemoteCheckout = $op === 'fetch' ? $this->pendingRemoteCheckout : null;
+        $this->pendingRemoteCheckout = null;
         $this->remoteOperation = null;
         $this->remoteProgress = '';
         $this->remoteErrorOutput = '';
@@ -1462,6 +1760,8 @@ class RepoView extends Component
             $this->errorMessage = $errorOutput !== ''
                 ? "{$label}: {$errorOutput}"
                 : "{$label} with exit code {$code}.";
+        } elseif ($pendingRemoteCheckout !== null) {
+            $this->openRemoteCheckoutOptions($pendingRemoteCheckout);
         } else {
             $label = match ($op) {
                 'fetch' => 'Fetched from remote',
@@ -1470,6 +1770,45 @@ class RepoView extends Component
                 default => ucfirst($op).' complete',
             };
             $this->dispatch('toast', message: $label, type: 'success');
+        }
+    }
+
+    /** Present the post-fetch choices for an already-existing local branch. */
+    private function openRemoteCheckoutOptions(string $remoteRef): void
+    {
+        $remoteBranch = $this->findBranchByName($remoteRef) ?? $this->findBranchInRepository($remoteRef);
+        if ($remoteBranch === null || ! $remoteBranch['isRemote']) {
+            $this->errorMessage = "Remote branch '{$remoteRef}' was not found after fetching.";
+
+            return;
+        }
+
+        $localBranchName = $this->localBranchNameFromRemote($remoteBranch['name']);
+        $localBranch = $this->findBranchByName($localBranchName) ?? $this->findBranchInRepository($localBranchName);
+
+        if ($localBranch === null) {
+            $this->runGitAction(
+                fn (GitService $git) => $git->checkoutRemoteBranch($remoteBranch['name']),
+                "Switched to '{$localBranchName}'",
+                resetGraphHistory: true,
+            );
+
+            return;
+        }
+
+        try {
+            $git = app(GitService::class);
+            $git->open($this->path);
+
+            $this->remoteCheckoutRemote = $remoteBranch['name'];
+            $this->remoteCheckoutLocal = $localBranch['name'];
+            $this->remoteCheckoutCanFastForward = $git->canFastForward(
+                $localBranch['name'],
+                $remoteBranch['name'],
+            );
+            $this->showRemoteCheckoutOptions = true;
+        } catch (\RuntimeException $e) {
+            $this->errorMessage = $e->getMessage();
         }
     }
 
@@ -1528,14 +1867,20 @@ class RepoView extends Component
      * Run a git action, refresh data on success, capture errors.
      * Optionally dispatches a success toast notification.
      */
-    private function runGitAction(callable $action, ?string $successMessage = null): void
-    {
+    private function runGitAction(
+        callable $action,
+        ?string $successMessage = null,
+        bool $resetGraphHistory = false,
+    ): void {
         $this->errorMessage = '';
 
         try {
             $git = app(GitService::class);
             $git->open($this->path);
             $action($git);
+            if ($resetGraphHistory) {
+                $this->resetGraphHistory();
+            }
             $this->loadRepoData();
 
             if ($successMessage) {
@@ -1572,6 +1917,7 @@ class RepoView extends Component
     private function closeTransientUi(): void
     {
         $this->closeContextMenu();
+        $this->closeRemoteCheckoutOptions();
         $this->clearSelection();
         $this->closeCreateBranch();
         $this->closeCreateTag();
@@ -1620,11 +1966,78 @@ class RepoView extends Component
 
     private function findBranchByName(string $name): ?array
     {
-        foreach (array_merge($this->localBranches, $this->remoteBranches) as $branch) {
+        foreach (array_merge(
+            $this->localBranches,
+            $this->remoteBranches,
+            $this->filteredLocalBranches,
+            $this->filteredRemoteBranches,
+        ) as $branch) {
             if ($branch['name'] === $name) {
                 return $branch;
             }
         }
+
+        return null;
+    }
+
+    private function resetGraphHistory(): void
+    {
+        $this->focusedHistoryRef = null;
+        $this->historyLimit = self::HISTORY_LIMIT;
+    }
+
+    private function loadedCommitHashFor(string $hash): ?string
+    {
+        return $this->commitHashFrom($this->commits, $hash);
+    }
+
+    /** @param list<array<string, mixed>> $commits */
+    private function commitHashFrom(array $commits, string $hash): ?string
+    {
+        foreach ($commits as $commit) {
+            $candidate = (string) ($commit['hash'] ?? '');
+            if ($candidate === $hash
+                || ($hash !== '' && str_starts_with($candidate, $hash))
+                || ($candidate !== '' && str_starts_with($hash, $candidate))) {
+                return $candidate;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Expand the all-refs graph in batches until a commit becomes visible.
+     *
+     * @throws \RuntimeException
+     */
+    private function expandAllHistoryUntil(string $hash): ?string
+    {
+        $this->focusedHistoryRef = null;
+        $git = app(GitService::class);
+        $git->open($this->path);
+        $defaultCommits = [];
+
+        for ($limit = self::HISTORY_LIMIT; $limit <= self::MAX_HISTORY_LIMIT; $limit += self::HISTORY_BATCH_SIZE) {
+            $commits = $git->getLog(limit: $limit, all: true);
+            $serializedCommits = $this->serializeCommits($commits, $limit);
+            if ($limit === self::HISTORY_LIMIT) {
+                $defaultCommits = $serializedCommits;
+            }
+
+            $commitHash = $this->commitHashFrom($serializedCommits, $hash);
+            if ($commitHash === null) {
+                continue;
+            }
+
+            $this->historyLimit = $limit;
+            $this->commits = $serializedCommits;
+
+            return $commitHash;
+        }
+
+        $this->historyLimit = self::HISTORY_LIMIT;
+        $this->commits = $defaultCommits;
 
         return null;
     }
@@ -1727,7 +2140,7 @@ class RepoView extends Component
     /**
      * @param  list<Commit>  $commits
      */
-    private function serializeCommits(array $commits): array
+    private function serializeCommits(array $commits, int $limit = self::HISTORY_LIMIT): array
     {
         return array_map(function (Commit $c): array {
             return [
@@ -1746,14 +2159,18 @@ class RepoView extends Component
                 'avatarInitials' => $this->initialsForAuthor($c->author),
                 'avatarHue' => $this->avatarHueForEmail($c->email),
             ];
-        }, array_slice($commits, 0, self::HISTORY_LIMIT));
+        }, array_slice($commits, 0, $limit));
     }
 
     /**
      * @param  list<Tag>  $tags
      */
-    private function serializeTags(array $tags): array
+    private function serializeTags(array $tags, bool $bounded = true): array
     {
+        if ($bounded) {
+            $tags = array_slice($tags, 0, self::MAX_TAGS);
+        }
+
         return array_map(fn (Tag $t) => [
             'name' => $t->name,
             'hash' => $t->hash,
@@ -1761,20 +2178,24 @@ class RepoView extends Component
             'isAnnotated' => $t->isAnnotated,
             'date' => $t->date?->toIso8601String(),
             'message' => $t->message !== null ? mb_substr($t->message, 0, self::MAX_TAG_MESSAGE_LENGTH) : null,
-        ], array_slice($tags, 0, self::MAX_TAGS));
+        ], $tags);
     }
 
     /**
      * @param  list<StashEntry>  $stashes
      */
-    private function serializeStashes(array $stashes): array
+    private function serializeStashes(array $stashes, bool $bounded = true): array
     {
+        if ($bounded) {
+            $stashes = array_slice($stashes, 0, self::MAX_STASHES);
+        }
+
         return array_map(fn (StashEntry $s) => [
             'ref' => $s->ref,
             'hash' => $s->hash,
             'message' => mb_substr($s->message, 0, self::MAX_STASH_MESSAGE_LENGTH),
             'index' => $s->index(),
-        ], array_slice($stashes, 0, self::MAX_STASHES));
+        ], $stashes);
     }
 
     /**
