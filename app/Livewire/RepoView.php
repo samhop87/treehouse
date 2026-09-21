@@ -150,6 +150,9 @@ class RepoView extends Component
     /** Loading states */
     public bool $isLoading = true;
 
+    /** Whether the deferred initial repository snapshot has been requested. */
+    public bool $hasLoadedInitialData = false;
+
     /** Context menu state */
     public bool $showContextMenu = false;
 
@@ -180,7 +183,6 @@ class RepoView extends Component
         $this->isActive = $isActive;
 
         $this->repoName = basename($this->path);
-        $this->loadRepoData();
     }
 
     // ─── DATA LOADING ────────────────────────────────────────────────────
@@ -190,6 +192,17 @@ class RepoView extends Component
      */
     public function refresh(): void
     {
+        $this->loadRepoData();
+    }
+
+    /** Load the initial snapshot after Livewire has rendered the tab shell. */
+    public function loadInitialRepoData(): void
+    {
+        if ($this->hasLoadedInitialData) {
+            return;
+        }
+
+        $this->hasLoadedInitialData = true;
         $this->loadRepoData();
     }
 
@@ -204,27 +217,23 @@ class RepoView extends Component
                 $git->open($this->path);
             }
 
-            // Load status
-            $state = $git->getStatus();
+            $limit = min(self::MAX_HISTORY_LIMIT, max(self::HISTORY_LIMIT, $this->historyLimit));
+            $this->historyLimit = $limit;
+            $snapshot = $git->getInitialSnapshot($limit, $this->focusedHistoryRef);
+
+            $state = $snapshot->state;
             $this->populateStatusFromState($state);
             $this->currentOperation = $git->getOperationState();
             if ($state->hasConflicts() && $this->currentOperation === null) {
                 $this->currentOperation = 'conflict';
             }
 
-            // Load commits
-            $this->loadGraphHistory($git);
-
-            // Load branches
-            $branches = $git->getBranches();
+            $this->commits = $this->serializeCommits($snapshot->commits, $limit);
+            $branches = $snapshot->branches;
             $this->hydrateBranches($branches);
-
-            // Load tags
-            $tags = $git->getTags();
+            $tags = $snapshot->tags;
             $this->tags = $this->serializeTags($tags);
-
-            // Load stashes
-            $stashes = $git->getStashes();
+            $stashes = $snapshot->stashes;
             $this->stashes = $this->serializeStashes($stashes);
             $this->hydrateFilteredReferences($branches, $tags, $stashes);
 
@@ -285,21 +294,6 @@ class RepoView extends Component
     private function hydrateBranches(array $branches): void
     {
         [$this->localBranches, $this->remoteBranches] = $this->serializeBranchGroups($branches, true);
-    }
-
-    private function loadGraphHistory(GitService $git): void
-    {
-        if ($this->focusedHistoryRef !== null) {
-            $commits = $git->getLogForRef($this->focusedHistoryRef, self::HISTORY_LIMIT);
-            $this->commits = $this->serializeCommits($commits, self::HISTORY_LIMIT);
-
-            return;
-        }
-
-        $limit = min(self::MAX_HISTORY_LIMIT, max(self::HISTORY_LIMIT, $this->historyLimit));
-        $this->historyLimit = $limit;
-        $commits = $git->getLog(limit: $limit, all: true);
-        $this->commits = $this->serializeCommits($commits, $limit);
     }
 
     /**

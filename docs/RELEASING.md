@@ -78,4 +78,4 @@ Retain the previous DMG until the new build has passed these checks. Installatio
 
 Treehouse owns the published NativePHP Electron project in `nativephp/electron` so its runtime versions are explicit. Version 0.1.0 uses Livewire 4.4.4, NativePHP Desktop 2.3.1, NativePHP PHP binaries 1.2.0, and Electron 41.10.3. The committed production Composer lock and complete npm lock currently report zero advisories.
 
-When upgrading NativePHP, review its published Electron template before replacing this directory. Running `native:install --publish` overwrites the project. Reapply intentional runtime changes, run the full npm audit, and repeat the DMG launch check before accepting an update.
+When upgrading NativePHP, review its published Electron template before replacing this directory. Running `native:install --publish` overwrites the project. Reapply intentional runtime changes—including Treehouse's static launch splash, combined startup command, and versioned Application Support caches—run the full npm audit, and repeat the DMG launch check before accepting an update.

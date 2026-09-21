@@ -28,7 +28,8 @@ app.whenReady().then(() => {
 
 app.on('browser-window-created', (event, window) => {
     if (splashWindow && window !== splashWindow) {
-        window.webContents.on('did-navigate', (evt, url) => {
+        window.webContents.on('did-finish-load', () => {
+            const url = window.webContents.getURL();
             if (url.startsWith('http://127.0.0.1') || url.startsWith('http://localhost')) {
                 if (splashWindow) {
                     splashWindow.close();

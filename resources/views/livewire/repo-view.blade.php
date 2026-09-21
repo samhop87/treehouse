@@ -1,4 +1,5 @@
 <div
+    wire:init="loadInitialRepoData"
     class="flex h-full min-h-0 overflow-hidden"
     x-data="repoView()"
     x-init="

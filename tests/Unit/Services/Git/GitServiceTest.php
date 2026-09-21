@@ -6,11 +6,11 @@ use App\DTOs\Branch;
 use App\DTOs\Commit;
 use App\DTOs\DiffFile;
 use App\DTOs\GitResult;
+use App\DTOs\RepoSnapshot;
 use App\DTOs\RepoState;
 use App\DTOs\StashEntry;
 use App\DTOs\Tag;
 use App\Services\Git\GitCommandRunner;
-use App\Services\Git\GitErrorTranslator;
 use App\Services\Git\GitService;
 use App\Services\Git\Parsers\BranchParser;
 use App\Services\Git\Parsers\DiffParser;
@@ -62,7 +62,7 @@ class GitServiceTest extends TestCase
     {
         $this->expectException(\RuntimeException::class);
 
-        $this->git->open('/tmp/definitely-not-real-' . uniqid());
+        $this->git->open('/tmp/definitely-not-real-'.uniqid());
     }
 
     #[Test]
@@ -204,6 +204,24 @@ class GitServiceTest extends TestCase
 
         $this->assertNotEmpty($allCommits);
         $this->assertNotEmpty($currentOnly);
+    }
+
+    #[Test]
+    public function initial_snapshot_parses_the_concurrent_repository_overview(): void
+    {
+        $repo = $this->findTestRepo();
+        if ($repo === null) {
+            $this->markTestSkipped('No test git repository available.');
+        }
+
+        $this->git->open($repo);
+        $snapshot = $this->git->getInitialSnapshot(limit: 5);
+
+        $this->assertInstanceOf(RepoSnapshot::class, $snapshot);
+        $this->assertContainsOnlyInstancesOf(Commit::class, $snapshot->commits);
+        $this->assertContainsOnlyInstancesOf(Branch::class, $snapshot->branches);
+        $this->assertContainsOnlyInstancesOf(Tag::class, $snapshot->tags);
+        $this->assertContainsOnlyInstancesOf(StashEntry::class, $snapshot->stashes);
     }
 
     #[Test]
@@ -450,7 +468,7 @@ class GitServiceTest extends TestCase
         }
 
         $this->git->open($repo);
-        $url = $this->git->getRemoteUrl('nonexistent-remote-' . uniqid());
+        $url = $this->git->getRemoteUrl('nonexistent-remote-'.uniqid());
 
         $this->assertNull($url);
     }

@@ -2,10 +2,19 @@
 
 namespace Tests\Feature\Livewire;
 
+use App\Livewire\Landing;
+use Livewire\Livewire;
 use Tests\TestCase;
 
 class LandingTest extends TestCase
 {
+    public function test_landing_shell_defers_startup_checks_until_after_its_first_render(): void
+    {
+        Livewire::test(Landing::class)
+            ->assertSet('startupStateLoaded', false)
+            ->assertSeeHtml('wire:init="loadStartupState"');
+    }
+
     public function test_recent_repository_renders_a_complete_wire_click_action(): void
     {
         $html = view('livewire.landing', [
@@ -19,6 +28,7 @@ class LandingTest extends TestCase
             ]],
             'isGitHubConnected' => false,
             'gitHubUser' => null,
+            'startupStateLoaded' => true,
         ])->render();
 
         $document = new \DOMDocument;

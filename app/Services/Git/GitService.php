@@ -6,6 +6,7 @@ use App\DTOs\Branch;
 use App\DTOs\Commit;
 use App\DTOs\DiffFile;
 use App\DTOs\GitResult;
+use App\DTOs\RepoSnapshot;
 use App\DTOs\RepoState;
 use App\DTOs\StashEntry;
 use App\DTOs\Tag;
@@ -176,6 +177,38 @@ class GitService
         $result->throw('Failed to list stashes');
 
         return $this->stashParser->parse($result->output);
+    }
+
+    /**
+     * Retrieve the independent reads needed for the initial repository view.
+     *
+     * The command runner starts all five Git processes concurrently, then this
+     * service preserves the existing parsing and error messages at the API edge.
+     */
+    public function getInitialSnapshot(int $limit = 200, ?string $historyRef = null): RepoSnapshot
+    {
+        $this->ensureOpen();
+
+        $logExtraArgs = $historyRef === null ? ['--all'] : [$historyRef];
+        $results = $this->commandRunner->overview($limit, $logExtraArgs);
+
+        $results['status']->throw('Failed to get repository status');
+        $results['log']->throw(
+            $historyRef === null
+                ? 'Failed to get commit log'
+                : "Failed to get commit log for '{$historyRef}'",
+        );
+        $results['branches']->throw('Failed to list branches');
+        $results['tags']->throw('Failed to list tags');
+        $results['stashes']->throw('Failed to list stashes');
+
+        return new RepoSnapshot(
+            state: $this->statusParser->parse($results['status']->output),
+            commits: $this->logParser->parse($results['log']->output),
+            branches: $this->branchParser->parse($results['branches']->output),
+            tags: $this->tagParser->parse($results['tags']->output),
+            stashes: $this->stashParser->parse($results['stashes']->output),
+        );
     }
 
     /**

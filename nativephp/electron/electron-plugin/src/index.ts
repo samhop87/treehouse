@@ -8,8 +8,7 @@ import ps from 'ps-node';
 import { stopAllProcesses } from './server/api/childProcess.js';
 import {
     killScheduler,
-    retrieveNativePHPConfig,
-    retrievePhpIniSettings,
+    retrieveNativePHPBootstrapConfiguration,
     runScheduler,
     startAPI,
     startPhpApp,
@@ -111,7 +110,8 @@ class NativePHP {
     private async bootstrapApp(app: Electron.CrossProcessExports.App) {
         await app.whenReady();
 
-        const config = await this.loadConfig();
+        const { config, phpIni } = await this.loadStartupConfiguration();
+        state.phpIni = phpIni;
 
         this.setDockIcon();
         this.setAppUserModelId(config);
@@ -119,8 +119,6 @@ class NativePHP {
         this.startAutoUpdater(config);
 
         await this.startElectronApi();
-
-        state.phpIni = await this.loadPhpIni();
 
         await this.startPhpApp();
         this.startScheduler();
@@ -151,18 +149,14 @@ class NativePHP {
         await notifyLaravel('booted');
     }
 
-    private async loadConfig() {
-        let config = {};
-
+    private async loadStartupConfiguration() {
         try {
-            const result = await retrieveNativePHPConfig();
-
-            config = JSON.parse(result.stdout);
+            return await retrieveNativePHPBootstrapConfiguration();
         } catch (error) {
             console.error(error);
-        }
 
-        return config;
+            return { config: {}, phpIni: {} };
+        }
     }
 
     private setDockIcon() {
@@ -245,20 +239,6 @@ class NativePHP {
         state.electronApiPort = electronApi.port;
 
         console.log('Electron API server started on port', electronApi.port);
-    }
-
-    private async loadPhpIni() {
-        let config = {};
-
-        try {
-            const result = await retrievePhpIniSettings();
-
-            config = JSON.parse(result.stdout);
-        } catch (error) {
-            console.error(error);
-        }
-
-        return config;
     }
 
     private async startPhpApp() {

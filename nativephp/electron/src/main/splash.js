@@ -43,7 +43,7 @@ export function getEnvConfig(baseDir, key, defaultValue = null) {
 export function createSplash(appPath, importMetaDirname) {
     const baseDir = getLaravelBaseDir(appPath, importMetaDirname);
 
-    const enabled = getEnvConfig(baseDir, 'NATIVEPHP_SPLASH_ENABLED', 'false') === 'true';
+    const enabled = getEnvConfig(baseDir, 'NATIVEPHP_SPLASH_ENABLED', 'true') === 'true';
     if (!enabled) return null;
 
     const width = parseInt(getEnvConfig(baseDir, 'NATIVEPHP_SPLASH_WIDTH', '400'));
@@ -56,6 +56,8 @@ export function createSplash(appPath, importMetaDirname) {
         frame: false,
         transparent: true,
         alwaysOnTop: true,
+        resizable: false,
+        skipTaskbar: true,
         webPreferences: { nodeIntegration: false }
     });
 

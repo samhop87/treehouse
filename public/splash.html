@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Starting Treehouse</title>
+    <style>
+        :root { color-scheme: dark; }
+        * { box-sizing: border-box; }
+        body {
+            align-items: center;
+            background: transparent;
+            display: flex;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            height: 100vh;
+            justify-content: center;
+            margin: 0;
+        }
+        main {
+            align-items: center;
+            background: linear-gradient(145deg, #17172a, #0b0b14);
+            border: 1px solid rgba(167, 139, 250, .28);
+            border-radius: 22px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, .48), inset 0 1px rgba(255, 255, 255, .05);
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            justify-content: center;
+            width: 100%;
+        }
+        img {
+            border-radius: 22%;
+            box-shadow: 0 10px 32px rgba(124, 58, 237, .38);
+            height: 72px;
+            width: 72px;
+        }
+        h1 { color: #f4f3ff; font-size: 25px; letter-spacing: -.025em; margin: 18px 0 6px; }
+        p { color: #a78bfa; font-size: 13px; margin: 0; opacity: .78; }
+        .spinner {
+            animation: spin .8s linear infinite;
+            border: 2px solid rgba(196, 181, 253, .2);
+            border-radius: 50%;
+            border-top-color: #a78bfa;
+            height: 18px;
+            margin-top: 22px;
+            width: 18px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <main aria-label="Starting Treehouse">
+        <img src="./icon.png" alt="">
+        <h1>Treehouse</h1>
+        <p>Starting your workspace…</p>
+        <div class="spinner" aria-label="Loading"></div>
+    </main>
+</body>
+</html>

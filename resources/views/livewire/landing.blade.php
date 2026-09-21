@@ -1,11 +1,11 @@
-<div class="flex items-center justify-center h-full">
+<div wire:init="loadStartupState" class="flex items-center justify-center h-full">
     <div class="text-center space-y-8 max-w-md w-full px-6">
         {{-- Logo / App name --}}
         <div>
             <img src="/icon.png" alt="" class="mx-auto mb-4 h-20 w-20 rounded-[22%] shadow-lg shadow-violet-950/50">
             <h1 class="text-4xl font-bold text-gray-100 tracking-tight">Treehouse</h1>
             <p class="mt-2 text-sm text-purple-400/60">A desktop Git client</p>
-            @if ($gitVersion)
+            @if ($startupStateLoaded && $gitVersion)
                 <p class="mt-1 text-[10px] text-gray-700">Git {{ $gitVersion }}</p>
             @endif
         </div>
@@ -23,13 +23,13 @@
             <button
                 wire:click="openRepo"
                 wire:loading.attr="disabled"
-                @disabled($gitVersion === null)
+                @disabled(! $startupStateLoaded || $gitVersion === null)
                 class="w-full px-6 py-3 bg-violet-600 hover:bg-violet-500 text-white font-medium rounded-lg transition-colors duration-150 cursor-pointer disabled:opacity-50 glow-violet"
             >
-                <span wire:loading.remove wire:target="openRepo">Open Repository</span>
+                <span wire:loading.remove wire:target="openRepo">{{ $startupStateLoaded ? 'Open Repository' : 'Preparing…' }}</span>
                 <span wire:loading wire:target="openRepo">Opening...</span>
             </button>
-            @if ($gitVersion)
+            @if ($startupStateLoaded && $gitVersion)
                 <a
                     href="/clone"
                     wire:navigate
@@ -48,7 +48,9 @@
         <div class="text-left">
             <h2 class="text-xs font-semibold uppercase tracking-wider text-purple-400/50 mb-3">Recent Repositories</h2>
 
-            @if (count($recentRepos) > 0)
+            @if (! $startupStateLoaded)
+                <div class="py-4 text-center text-sm text-gray-600">Loading recent repositories…</div>
+            @elseif (count($recentRepos) > 0)
                 <div class="space-y-1">
                     @foreach ($recentRepos as $repo)
                         <div
@@ -89,7 +91,12 @@
 
         {{-- GitHub connection status --}}
         <div class="pt-4 border-t border-[#1e1e32]">
-            @if ($isGitHubConnected)
+            @if (! $startupStateLoaded)
+                <div class="flex items-center justify-center gap-2 text-sm text-gray-600">
+                    <span class="h-2 w-2 animate-pulse rounded-full bg-gray-600"></span>
+                    Checking GitHub connection…
+                </div>
+            @elseif ($isGitHubConnected)
                 <div class="flex items-center justify-between">
                     <div class="flex items-center gap-2 text-sm text-gray-400">
                         <div class="w-2 h-2 rounded-full bg-violet-500 shadow-[0_0_6px_rgba(139,92,246,0.5)]"></div>

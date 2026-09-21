@@ -8,6 +8,7 @@ use App\DTOs\DiffFile;
 use App\DTOs\DiffHunk;
 use App\DTOs\DiffLine;
 use App\DTOs\GitResult;
+use App\DTOs\RepoSnapshot;
 use App\DTOs\RepoState;
 use App\DTOs\StashEntry;
 use App\DTOs\Tag;
@@ -21,11 +22,27 @@ use Tests\TestCase;
 
 class RepoViewTest extends TestCase
 {
+    public function test_repository_shell_defers_its_initial_snapshot_until_after_first_render(): void
+    {
+        $git = Mockery::mock(GitService::class);
+        $git->shouldNotReceive('open');
+        $this->app->instance(GitService::class, $git);
+
+        Livewire::test(RepoView::class, [
+            'path' => '/fake/repo',
+            'tabId' => 'tab-1',
+            'isActive' => true,
+        ])
+            ->assertSet('hasLoadedInitialData', false)
+            ->assertSet('isLoading', true)
+            ->assertSeeHtml('wire:init="loadInitialRepoData"');
+    }
+
     public function test_inactive_tabs_ignore_window_focus_refreshes(): void
     {
         $this->bindGitServiceMock(loadCount: 1);
 
-        Livewire::test(RepoView::class, [
+        $this->repoView([
             'path' => '/fake/repo',
             'tabId' => 'tab-1',
             'isActive' => false,
@@ -36,7 +53,7 @@ class RepoViewTest extends TestCase
     {
         $this->bindGitServiceMock(loadCount: 1);
 
-        Livewire::test(RepoView::class, [
+        $this->repoView([
             'path' => '/fake/repo',
             'tabId' => 'tab-1',
             'isActive' => false,
@@ -47,7 +64,7 @@ class RepoViewTest extends TestCase
     {
         $this->bindGitServiceMock(loadCount: 2);
 
-        Livewire::test(RepoView::class, [
+        $this->repoView([
             'path' => '/fake/repo',
             'tabId' => 'tab-1',
             'isActive' => true,
@@ -62,7 +79,7 @@ class RepoViewTest extends TestCase
             commitDiffs: [$historyDiff],
         );
 
-        $component = Livewire::test(RepoView::class, [
+        $component = $this->repoView([
             'path' => '/fake/repo',
             'tabId' => 'tab-1',
             'isActive' => true,
@@ -81,7 +98,7 @@ class RepoViewTest extends TestCase
     {
         $this->bindSelectableGitServiceMock();
 
-        $html = Livewire::test(RepoView::class, [
+        $html = $this->repoView([
             'path' => '/fake/repo',
             'tabId' => 'tab-1',
             'isActive' => true,
@@ -97,7 +114,7 @@ class RepoViewTest extends TestCase
     {
         $this->bindSelectableGitServiceMock();
 
-        $html = Livewire::test(RepoView::class, [
+        $html = $this->repoView([
             'path' => '/fake/repo',
             'tabId' => 'tab-1',
             'isActive' => true,
@@ -118,7 +135,7 @@ class RepoViewTest extends TestCase
         $description = "Explains the change.\n\nIncludes the full second paragraph.";
         $this->bindSelectableGitServiceMock();
 
-        $component = Livewire::test(RepoView::class, [
+        $component = $this->repoView([
             'path' => '/fake/repo',
             'tabId' => 'tab-1',
             'isActive' => true,
@@ -137,7 +154,7 @@ class RepoViewTest extends TestCase
     {
         $this->bindSelectableGitServiceMock();
 
-        Livewire::test(RepoView::class, [
+        $this->repoView([
             'path' => '/fake/repo',
             'tabId' => 'tab-1',
             'isActive' => true,
@@ -159,7 +176,7 @@ class RepoViewTest extends TestCase
             command: "git commit -m 'UI commit works' -m 'This explains the change.'",
         ));
 
-        Livewire::test(RepoView::class, [
+        $this->repoView([
             'path' => '/fake/repo',
             'tabId' => 'tab-1',
             'isActive' => true,
@@ -188,7 +205,7 @@ class RepoViewTest extends TestCase
             command: 'git add -- README.md',
         ));
 
-        Livewire::test(RepoView::class, [
+        $this->repoView([
             'path' => '/fake/repo',
             'tabId' => 'tab-1',
             'isActive' => true,
@@ -201,7 +218,7 @@ class RepoViewTest extends TestCase
     {
         $this->bindGitServiceMock(loadCount: 1);
 
-        $html = Livewire::test(RepoView::class, [
+        $html = $this->repoView([
             'path' => '/fake/repo',
             'tabId' => 'tab-1',
             'isActive' => true,
@@ -225,7 +242,7 @@ class RepoViewTest extends TestCase
     {
         $this->bindGitServiceMock(loadCount: 1);
 
-        $component = Livewire::test(RepoView::class, [
+        $component = $this->repoView([
             'path' => '/fake/repo',
             'tabId' => 'tab-1',
             'isActive' => true,
@@ -254,7 +271,7 @@ class RepoViewTest extends TestCase
             refDiffs: [$historyDiff],
         );
 
-        $component = Livewire::test(RepoView::class, [
+        $component = $this->repoView([
             'path' => '/fake/repo',
             'tabId' => 'tab-1',
             'isActive' => true,
@@ -280,7 +297,7 @@ class RepoViewTest extends TestCase
             command: 'git checkout feature/test',
         ));
 
-        Livewire::test(RepoView::class, [
+        $this->repoView([
             'path' => '/fake/repo',
             'tabId' => 'tab-1',
             'isActive' => true,
@@ -305,7 +322,7 @@ class RepoViewTest extends TestCase
             command: 'git checkout feature/test',
         ));
 
-        Livewire::test(RepoView::class, [
+        $this->repoView([
             'path' => '/fake/repo',
             'tabId' => 'tab-1',
             'isActive' => true,
@@ -334,7 +351,7 @@ class RepoViewTest extends TestCase
             ->with('feature/test', 'origin/feature/test')
             ->andReturn(true);
 
-        Livewire::test(RepoView::class, [
+        $this->repoView([
             'path' => '/fake/repo',
             'tabId' => 'tab-1',
             'isActive' => true,
@@ -351,7 +368,6 @@ class RepoViewTest extends TestCase
 
     public function test_focus_graph_loads_history_reachable_from_the_selected_branch(): void
     {
-        $git = $this->bindSelectableGitServiceMock();
         $focusedCommit = new Commit(
             hash: 'def567812345',
             shortHash: 'def5678',
@@ -362,12 +378,24 @@ class RepoViewTest extends TestCase
             message: 'Old feature commit',
             refs: ['origin/feature/test'],
         );
-        $git->shouldReceive('getLogForRef')
-            ->once()
-            ->with('origin/feature/test', 200)
-            ->andReturn([$focusedCommit]);
 
-        Livewire::test(RepoView::class, [
+        $git = $this->bindSelectableGitServiceMock();
+        $git->shouldReceive('getInitialSnapshot')
+            ->with(200, 'origin/feature/test')
+            ->once()
+            ->andReturn(new RepoSnapshot(
+                state: new RepoState('abc1234', 'main', 'origin/main'),
+                commits: [$focusedCommit],
+                branches: [
+                    new Branch('main', 'abc1234', true, false, 'origin/main'),
+                    new Branch('feature/test', 'def5678', false, false, 'origin/feature/test'),
+                    new Branch('origin/feature/test', 'def5678', false, true),
+                ],
+                tags: [],
+                stashes: [],
+            ));
+
+        $this->repoView([
             'path' => '/fake/repo',
             'tabId' => 'tab-1',
             'isActive' => true,
@@ -409,7 +437,7 @@ class RepoViewTest extends TestCase
                 $oldCommit,
             ]);
 
-        Livewire::test(RepoView::class, [
+        $this->repoView([
             'path' => '/fake/repo',
             'tabId' => 'tab-1',
             'isActive' => true,
@@ -452,7 +480,7 @@ class RepoViewTest extends TestCase
                 $oldCommit,
             ]);
 
-        Livewire::test(RepoView::class, [
+        $this->repoView([
             'path' => '/fake/repo',
             'tabId' => 'tab-1',
             'isActive' => true,
@@ -468,7 +496,7 @@ class RepoViewTest extends TestCase
     {
         $this->bindSelectableGitServiceMock();
 
-        $html = Livewire::test(RepoView::class, [
+        $html = $this->repoView([
             'path' => '/fake/repo',
             'tabId' => 'tab-1',
             'isActive' => true,
@@ -483,7 +511,7 @@ class RepoViewTest extends TestCase
     {
         $this->bindSelectableGitServiceMock();
 
-        $html = Livewire::test(RepoView::class, [
+        $html = $this->repoView([
             'path' => '/fake/repo',
             'tabId' => 'tab-1',
             'isActive' => true,
@@ -501,7 +529,7 @@ class RepoViewTest extends TestCase
     {
         $this->bindSelectableGitServiceMock();
 
-        $html = Livewire::test(RepoView::class, [
+        $html = $this->repoView([
             'path' => '/fake/repo',
             'tabId' => 'tab-1',
             'isActive' => true,
@@ -563,16 +591,21 @@ class RepoViewTest extends TestCase
 
         $git = Mockery::mock(GitService::class);
         $git->shouldReceive('open')->times(3)->with('/fake/repo')->andReturnSelf();
-        $git->shouldReceive('getStatus')->once()->andReturn($state);
+        $git->shouldReceive('getInitialSnapshot')->once()->with(200, null)->andReturn(new RepoSnapshot(
+            state: $state,
+            commits: [$commit],
+            branches: $branches,
+            tags: $tags,
+            stashes: $stashes,
+        ));
         $git->shouldReceive('getOperationState')->once()->andReturnNull();
-        $git->shouldReceive('getLog')->once()->with(200, true)->andReturn([$commit]);
-        $git->shouldReceive('getBranches')->twice()->andReturn($branches);
-        $git->shouldReceive('getTags')->twice()->andReturn($tags);
-        $git->shouldReceive('getStashes')->twice()->andReturn($stashes);
+        $git->shouldReceive('getBranches')->once()->andReturn($branches);
+        $git->shouldReceive('getTags')->once()->andReturn($tags);
+        $git->shouldReceive('getStashes')->once()->andReturn($stashes);
         $git->shouldReceive('getRefComparisonFiles')->once()->with('DEV-90-feature')->andReturn([]);
         $this->app->instance(GitService::class, $git);
 
-        $component = Livewire::test(RepoView::class, [
+        $component = $this->repoView([
             'path' => '/fake/repo',
             'tabId' => 'tab-1',
             'isActive' => true,
@@ -605,7 +638,7 @@ class RepoViewTest extends TestCase
     {
         $this->bindSelectableGitServiceMock();
 
-        $html = Livewire::test(RepoView::class, [
+        $html = $this->repoView([
             'path' => '/fake/repo',
             'tabId' => 'tab-1',
             'isActive' => true,
@@ -646,9 +679,15 @@ class RepoViewTest extends TestCase
 
         $git = Mockery::mock(GitService::class);
         $git->shouldReceive('open')->with('/fake/repo')->andReturnSelf();
+        $git->shouldReceive('getInitialSnapshot')->andReturn(new RepoSnapshot(
+            state: $state,
+            commits: [$commit],
+            branches: $branches,
+            tags: [],
+            stashes: [],
+        ));
         $git->shouldReceive('getStatus')->andReturn($state);
         $git->shouldReceive('getOperationState')->andReturnNull();
-        $git->shouldReceive('getLog')->with(200, true)->andReturn([$commit]);
         $git->shouldReceive('getBranches')->andReturn($branches);
         $git->shouldReceive('getTags')->andReturn([]);
         $git->shouldReceive('getStashes')->andReturn([]);
@@ -661,7 +700,7 @@ class RepoViewTest extends TestCase
         ));
         $this->app->instance(GitService::class, $git);
 
-        Livewire::test(RepoView::class, [
+        $this->repoView([
             'path' => '/fake/repo',
             'tabId' => 'tab-1',
             'isActive' => true,
@@ -680,7 +719,7 @@ class RepoViewTest extends TestCase
             commitDiffs: [$historyDiff],
         );
 
-        $component = Livewire::test(RepoView::class, [
+        $component = $this->repoView([
             'path' => '/fake/repo',
             'tabId' => 'tab-1',
             'isActive' => true,
@@ -722,7 +761,7 @@ class RepoViewTest extends TestCase
 
         $this->bindSelectableGitServiceMock(commitDiffs: [$largeDiff]);
 
-        $component = Livewire::test(RepoView::class, [
+        $component = $this->repoView([
             'path' => '/fake/repo',
             'tabId' => 'tab-1',
             'isActive' => true,
@@ -748,7 +787,7 @@ class RepoViewTest extends TestCase
             fileDiffs: [$workingTreeDiff],
         );
 
-        $component = Livewire::test(RepoView::class, [
+        $component = $this->repoView([
             'path' => '/fake/repo',
             'tabId' => 'tab-1',
             'isActive' => true,
@@ -769,7 +808,7 @@ class RepoViewTest extends TestCase
     {
         $this->bindGitServiceMock(loadCount: 1);
 
-        Livewire::test(RepoView::class, [
+        $this->repoView([
             'path' => '/fake/repo',
             'tabId' => 'tab-1',
             'isActive' => true,
@@ -784,7 +823,7 @@ class RepoViewTest extends TestCase
     {
         $this->bindGitServiceMock(loadCount: 1);
 
-        Livewire::test(RepoView::class, [
+        $this->repoView([
             'path' => '/fake/repo',
             'tabId' => 'tab-1',
             'isActive' => true,
@@ -801,7 +840,7 @@ class RepoViewTest extends TestCase
     {
         $this->bindGitServiceMock(loadCount: 2);
 
-        Livewire::test(RepoView::class, [
+        $this->repoView([
             'path' => '/fake/repo',
             'tabId' => 'tab-1',
             'isActive' => true,
@@ -849,14 +888,19 @@ class RepoViewTest extends TestCase
             behind: 0,
         );
 
+        $snapshot = new RepoSnapshot(
+            state: $state,
+            commits: [$commit],
+            branches: [$branch],
+            tags: [],
+            stashes: [],
+        );
+
         $git = Mockery::mock(GitService::class);
         $git->shouldReceive('open')->times($openCount ?? $loadCount)->with('/fake/repo')->andReturnSelf();
-        $git->shouldReceive('getStatus')->times($loadCount + $workingTreeRefreshCount)->andReturn($state);
+        $git->shouldReceive('getInitialSnapshot')->times($loadCount)->andReturn($snapshot);
+        $git->shouldReceive('getStatus')->times($workingTreeRefreshCount)->andReturn($state);
         $git->shouldReceive('getOperationState')->times($loadCount + $workingTreeRefreshCount)->andReturnNull();
-        $git->shouldReceive('getLog')->times($loadCount)->with(200, true)->andReturn([$commit]);
-        $git->shouldReceive('getBranches')->times($loadCount)->andReturn([$branch]);
-        $git->shouldReceive('getTags')->times($loadCount)->andReturn([]);
-        $git->shouldReceive('getStashes')->times($loadCount)->andReturn([]);
 
         $this->app->instance(GitService::class, $git);
 
@@ -925,8 +969,17 @@ class RepoViewTest extends TestCase
             ),
         ];
 
+        $snapshot = new RepoSnapshot(
+            state: $state,
+            commits: [$commit],
+            branches: $branches,
+            tags: [],
+            stashes: [],
+        );
+
         $git = Mockery::mock(GitService::class);
         $git->shouldReceive('open')->with('/fake/repo')->andReturnSelf();
+        $git->shouldReceive('getInitialSnapshot')->byDefault()->andReturn($snapshot);
         $git->shouldReceive('getStatus')->andReturn($state);
         $git->shouldReceive('getOperationState')->andReturnNull();
         $git->shouldReceive('getLog')->with(200, true)->andReturn([$commit]);
@@ -942,6 +995,16 @@ class RepoViewTest extends TestCase
         $this->app->instance(GitService::class, $git);
 
         return $git;
+    }
+
+    /**
+     * Browser clients invoke wire:init after the tab shell paints; model that
+     * explicit second request in Livewire feature tests.
+     */
+    private function repoView(array $parameters)
+    {
+        return Livewire::test(RepoView::class, $parameters)
+            ->call('loadInitialRepoData');
     }
 
     private function makeDiffFile(string $path): DiffFile

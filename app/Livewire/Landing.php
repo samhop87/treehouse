@@ -26,22 +26,41 @@ class Landing extends Component
 
     public ?string $gitVersion = null;
 
-    public function mount(
+    /**
+     * The first response intentionally avoids local Git and credential-store IO.
+     * Livewire invokes loadStartupState after the landing shell is painted.
+     */
+    public bool $startupStateLoaded = false;
+
+    public function mount(): void
+    {
+        // Startup checks are deferred so the landing route can render immediately.
+    }
+
+    public function loadStartupState(
         GitHubAuthService $authService,
         RepoManager $repoManager,
         GitCommandRunner $git,
     ): void {
-        $this->gitVersion = $git->version();
-        if ($this->gitVersion === null) {
-            $this->errorMessage = 'Treehouse requires Git. Install the Apple Command Line Tools, then reopen the app.';
+        if ($this->startupStateLoaded) {
+            return;
         }
 
-        $this->isGitHubConnected = $authService->hasToken();
-        if ($this->isGitHubConnected) {
-            $this->gitHubUser = $authService->getUser();
-        }
+        try {
+            $this->gitVersion = $git->version();
+            if ($this->gitVersion === null) {
+                $this->errorMessage = 'Treehouse requires Git. Install the Apple Command Line Tools, then reopen the app.';
+            }
 
-        $this->loadRecentRepos($repoManager);
+            $this->isGitHubConnected = $authService->hasToken();
+            if ($this->isGitHubConnected) {
+                $this->gitHubUser = $authService->getUser();
+            }
+
+            $this->loadRecentRepos($repoManager);
+        } finally {
+            $this->startupStateLoaded = true;
+        }
     }
 
     /**
@@ -50,6 +69,10 @@ class Landing extends Component
     public function openRepo(RepoManager $repoManager): void
     {
         $this->errorMessage = '';
+
+        if (! $this->startupStateLoaded) {
+            return;
+        }
 
         if ($this->gitVersion === null) {
             $this->errorMessage = 'Treehouse requires Git. Install the Apple Command Line Tools, then reopen the app.';

@@ -1,6 +1,6 @@
 import { ChildProcess } from 'child_process';
 import startAPIServer, { APIProcess } from './api.js';
-import { retrieveNativePHPConfig, retrievePhpIniSettings, serveApp, startScheduler } from './php.js';
+import { retrieveNativePHPBootstrapConfiguration, serveApp, startScheduler } from './php.js';
 import state from './state.js';
 import { appendCookie } from './utils.js';
 
@@ -32,4 +32,4 @@ export function startAPI(): Promise<APIProcess> {
     return startAPIServer(state.randomSecret);
 }
 
-export { retrieveNativePHPConfig, retrievePhpIniSettings };
+export { retrieveNativePHPBootstrapConfiguration };

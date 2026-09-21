@@ -172,7 +172,7 @@ class GitCommandRunner
     public function status(): GitResult
     {
         // NUL delimiters preserve spaces, quotes, Unicode and newlines in paths.
-        return $this->run(['status', '--porcelain=v2', '--branch', '-z']);
+        return $this->run($this->statusArgs());
     }
 
     /**
@@ -183,15 +183,7 @@ class GitCommandRunner
      */
     public function log(int $limit = 200, array $extraArgs = []): GitResult
     {
-        $args = [
-            'log',
-            '-z',
-            '--format=%H%x00%h%x00%P%x00%an%x00%ae%x00%aI%x00%D%x00%s%x00%b',
-            "-n{$limit}",
-            ...$extraArgs,
-        ];
-
-        return $this->run($args);
+        return $this->run($this->logArgs($limit, $extraArgs));
     }
 
     /**
@@ -199,10 +191,7 @@ class GitCommandRunner
      */
     public function branches(): GitResult
     {
-        return $this->run([
-            'branch', '-a',
-            '--format=%(refname)|%(refname:short)|%(objectname:short)|%(HEAD)|%(upstream:short)|%(upstream:track)',
-        ]);
+        return $this->run($this->branchesArgs());
     }
 
     /**
@@ -210,10 +199,7 @@ class GitCommandRunner
      */
     public function tags(): GitResult
     {
-        return $this->run([
-            'tag', '-l',
-            '--format=%(refname:short)|%(objectname:short)|%(*objectname:short)|%(objecttype)|%(creatordate:iso-strict)|%(subject)',
-        ]);
+        return $this->run($this->tagsArgs());
     }
 
     /**
@@ -221,7 +207,67 @@ class GitCommandRunner
      */
     public function stashes(): GitResult
     {
-        return $this->run(['stash', 'list', '--format=%gd|%H|%gs']);
+        return $this->run($this->stashesArgs());
+    }
+
+    /**
+     * Run the independent reads that make up a repository tab at once.
+     *
+     * @param  list<string>  $logExtraArgs
+     * @return array{status: GitResult, log: GitResult, branches: GitResult, tags: GitResult, stashes: GitResult}
+     */
+    public function overview(int $limit = 200, array $logExtraArgs = []): array
+    {
+        $commands = [
+            'status' => $this->statusArgs(),
+            'log' => $this->logArgs($limit, $logExtraArgs),
+            'branches' => $this->branchesArgs(),
+            'tags' => $this->tagsArgs(),
+            'stashes' => $this->stashesArgs(),
+        ];
+
+        if ($this->repoPath !== null && ! is_dir($this->repoPath)) {
+            return array_map(fn (array $args) => $this->run($args), $commands);
+        }
+
+        try {
+            $results = Process::concurrently(function ($pool) use ($commands): void {
+                foreach ($commands as $name => $args) {
+                    $process = $pool->as($name)->timeout(30);
+
+                    if ($this->repoPath !== null) {
+                        $process = $process->path($this->repoPath);
+                    }
+
+                    $process->command(array_merge(['git'], $args));
+                }
+            });
+        } catch (\Throwable $exception) {
+            return array_map(
+                fn (array $args) => new GitResult(
+                    success: false,
+                    output: '',
+                    error: $exception->getMessage(),
+                    exitCode: 127,
+                    command: implode(' ', array_merge(['git'], $args)),
+                ),
+                $commands,
+            );
+        }
+
+        $overview = [];
+        foreach ($commands as $name => $args) {
+            $result = $results[$name];
+            $overview[$name] = new GitResult(
+                success: $result->successful(),
+                output: $result->output(),
+                error: $result->errorOutput(),
+                exitCode: $result->exitCode(),
+                command: implode(' ', array_merge(['git'], $args)),
+            );
+        }
+
+        return $overview;
     }
 
     /**
@@ -244,5 +290,50 @@ class GitCommandRunner
         }
 
         return $this->run($args, timeout: 60);
+    }
+
+    /** @return list<string> */
+    private function statusArgs(): array
+    {
+        return ['status', '--porcelain=v2', '--branch', '-z'];
+    }
+
+    /**
+     * @param  list<string>  $extraArgs
+     * @return list<string>
+     */
+    private function logArgs(int $limit, array $extraArgs): array
+    {
+        return [
+            'log',
+            '-z',
+            '--format=%H%x00%h%x00%P%x00%an%x00%ae%x00%aI%x00%D%x00%s%x00%b',
+            "-n{$limit}",
+            ...$extraArgs,
+        ];
+    }
+
+    /** @return list<string> */
+    private function branchesArgs(): array
+    {
+        return [
+            'branch', '-a',
+            '--format=%(refname)|%(refname:short)|%(objectname:short)|%(HEAD)|%(upstream:short)|%(upstream:track)',
+        ];
+    }
+
+    /** @return list<string> */
+    private function tagsArgs(): array
+    {
+        return [
+            'tag', '-l',
+            '--format=%(refname:short)|%(objectname:short)|%(*objectname:short)|%(objecttype)|%(creatordate:iso-strict)|%(subject)',
+        ];
+    }
+
+    /** @return list<string> */
+    private function stashesArgs(): array
+    {
+        return ['stash', 'list', '--format=%gd|%H|%gs'];
     }
 }

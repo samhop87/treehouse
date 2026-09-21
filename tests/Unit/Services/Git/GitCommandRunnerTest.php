@@ -208,6 +208,24 @@ class GitCommandRunnerTest extends TestCase
     }
 
     #[Test]
+    public function it_loads_the_repository_overview_with_one_concurrent_pool(): void
+    {
+        $repo = $this->findTestRepo();
+        if ($repo === null) {
+            $this->markTestSkipped('No test git repository available.');
+        }
+
+        $overview = $this->runner
+            ->setRepoPath($repo)
+            ->overview(limit: 5, logExtraArgs: ['--all']);
+
+        $this->assertSame(['status', 'log', 'branches', 'tags', 'stashes'], array_keys($overview));
+        foreach ($overview as $result) {
+            $this->assertTrue($result->success, $result->error);
+        }
+    }
+
+    #[Test]
     public function git_result_lines_splits_output_correctly(): void
     {
         $result = new GitResult(

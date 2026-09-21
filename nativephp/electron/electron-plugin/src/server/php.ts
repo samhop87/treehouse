@@ -12,6 +12,7 @@ import { join } from 'path';
 import { promisify } from 'util';
 import { ProcessResult } from './ProcessResult.js';
 import state from './state.js';
+import { needsOptimization, startupCachePaths, StartupCachePaths } from './startupPolicy.js';
 
 // TODO: maybe in dev, don't go to the userData folder and stay in the Laravel app folder
 const storagePath = join(app.getPath('userData'), 'storage');
@@ -33,17 +34,6 @@ function runningSecureBuild() {
 
 function shouldMigrateDatabase(store) {
     return store.get('migrated_version') !== app.getVersion() && process.env.NODE_ENV !== 'development';
-}
-
-function shouldOptimize() {
-    /*
-     * For some weird reason,
-     * the cached config is not picked up on subsequent launches,
-     * so we'll just rebuilt it every time for now
-     */
-
-    return process.env.NODE_ENV !== 'development';
-    // return runningSecureBuild();
 }
 
 function hasNightwatchInstalled(appPath: string) {
@@ -157,6 +147,67 @@ async function retrievePhpIniSettings() {
     }
 
     return await promisify(execFile)(state.php, command, phpOptions);
+}
+
+export interface NativePHPBootstrapConfiguration {
+    config: Record<string, unknown>;
+    phpIni: Record<string, string>;
+}
+
+function parseBootstrapConfiguration(output: string): NativePHPBootstrapConfiguration {
+    const payload = JSON.parse(output);
+
+    if (
+        payload === null
+        || typeof payload !== 'object'
+        || Array.isArray(payload)
+        || payload.config === null
+        || typeof payload.config !== 'object'
+        || Array.isArray(payload.config)
+        || payload.phpIni === null
+        || typeof payload.phpIni !== 'object'
+        || Array.isArray(payload.phpIni)
+    ) {
+        throw new Error('Invalid Treehouse native bootstrap configuration.');
+    }
+
+    return {
+        config: payload.config,
+        phpIni: payload.phpIni,
+    };
+}
+
+async function retrieveNativePHPBootstrapConfiguration(): Promise<NativePHPBootstrapConfiguration> {
+    const env: NodeJS.ProcessEnv = {
+        ...process.env,
+        ...getDefaultEnvironmentVariables(),
+    };
+    const appPath = getAppPath();
+    const command = ['artisan', 'treehouse:native-bootstrap'];
+
+    if (runningSecureBuild()) {
+        command.unshift(join(appPath, 'build', '__nativephp_app_bundle'));
+    }
+
+    try {
+        const result = await promisify(execFile)(state.php, command, { cwd: appPath, env });
+
+        return parseBootstrapConfiguration(result.stdout);
+    } catch (error) {
+        // Existing installations should remain startable if a mismatched app
+        // bundle does not yet contain Treehouse's combined bootstrap command.
+        console.warn('Combined native bootstrap failed; using legacy startup commands.', error);
+
+        const [config, phpIni] = await Promise.all([
+            retrieveNativePHPConfig(),
+            retrievePhpIniSettings(),
+        ]);
+
+        return {
+            config: JSON.parse(config.stdout),
+            phpIni: JSON.parse(phpIni.stdout),
+        };
+    }
 }
 
 async function retrieveNativePHPConfig() {
@@ -327,6 +378,22 @@ interface EnvironmentVariables {
     NIGHTWATCH_INGEST_URI?: string;
 }
 
+function productionCachePaths(): StartupCachePaths | null {
+    if (process.env.NODE_ENV === 'development') {
+        return null;
+    }
+
+    const paths = startupCachePaths(
+        bootstrapCache,
+        String(app.getVersion() || 'unknown'),
+        join(storagePath, 'framework', 'views'),
+    );
+
+    mkdirpSync(paths.directory);
+
+    return paths;
+}
+
 function getDefaultEnvironmentVariables(secret?: string, apiPort?: number): EnvironmentVariables {
     // Base variables with string values (no null values)
     const variables: EnvironmentVariables = {
@@ -357,14 +424,16 @@ function getDefaultEnvironmentVariables(secret?: string, apiPort?: number): Envi
         variables.NATIVEPHP_SECRET = secret;
     }
 
-    // Only add cache paths if in production mode
-    if (runningSecureBuild()) {
-        variables.APP_SERVICES_CACHE = join(bootstrapCache, 'services.php'); // Should be present and writable
-        variables.APP_PACKAGES_CACHE = join(bootstrapCache, 'packages.php'); // Should be present and writable
-        variables.APP_CONFIG_CACHE = join(bootstrapCache, 'config.php');
-        variables.APP_ROUTES_CACHE = join(bootstrapCache, 'routes-v7.php');
-        variables.APP_EVENTS_CACHE = join(bootstrapCache, 'events.php');
-        // variables.VIEW_COMPILED_PATH; // TODO: keep those in the phar file if we can.
+    // Keep all generated Laravel files outside the application bundle. Caches
+    // are versioned so a new release never reads a previous release's config.
+    const cachePaths = productionCachePaths();
+    if (cachePaths !== null) {
+        variables.APP_SERVICES_CACHE = cachePaths.services;
+        variables.APP_PACKAGES_CACHE = cachePaths.packages;
+        variables.APP_CONFIG_CACHE = cachePaths.config;
+        variables.APP_ROUTES_CACHE = cachePaths.routes;
+        variables.APP_EVENTS_CACHE = cachePaths.events;
+        variables.VIEW_COMPILED_PATH = cachePaths.views;
     }
 
     return variables;
@@ -419,7 +488,14 @@ async function serveApp(secret, apiPort, phpIniSettings): Promise<ProcessResult>
     }
 
     // Cache the project
-    if (shouldOptimize()) {
+    const cachePaths = productionCachePaths();
+    if (cachePaths !== null && needsOptimization(
+        store,
+        String(app.getVersion() || 'unknown'),
+        cachePaths,
+        existsSync,
+        process.env.NODE_ENV === 'development',
+    )) {
         console.log('Caching view and routes...');
 
         const result = callPhpSync(['artisan', 'optimize'], phpOptions, phpIniSettings);
@@ -536,6 +612,8 @@ export {
     getAppPath,
     getDefaultEnvironmentVariables,
     getDefaultPhpIniSettings,
+    parseBootstrapConfiguration,
+    retrieveNativePHPBootstrapConfiguration,
     retrieveNativePHPConfig,
     retrievePhpIniSettings,
     runningSecureBuild,
