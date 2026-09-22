@@ -756,9 +756,7 @@
                                                         <span class="w-4 shrink-0 select-none text-center {{ $line['type'] === 'add' ? 'text-teal-600' : '' }} {{ $line['type'] === 'remove' ? 'text-red-600' : '' }} {{ $line['type'] === 'context' ? 'text-gray-700' : '' }}">
                                                             {{ $line['type'] === 'add' ? '+' : ($line['type'] === 'remove' ? '-' : ' ') }}
                                                         </span>
-                                                        <span class="flex-1 whitespace-pre pl-1 {{ $line['type'] === 'add' ? 'text-teal-400' : '' }} {{ $line['type'] === 'remove' ? 'text-red-400' : '' }} {{ $line['type'] === 'context' ? 'text-gray-500' : '' }}">
-                                                            {{ $line['content'] }}
-                                                        </span>
+                                                        <span class="flex-1 whitespace-pre pl-1 {{ $line['type'] === 'add' ? 'text-teal-400' : '' }} {{ $line['type'] === 'remove' ? 'text-red-400' : '' }} {{ $line['type'] === 'context' ? 'text-gray-500' : '' }}">{{ $line['content'] }}</span>
                                                     </div>
                                                 @endforeach
                                             @endforeach

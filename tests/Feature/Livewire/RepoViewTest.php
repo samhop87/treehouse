@@ -804,6 +804,28 @@ class RepoViewTest extends TestCase
         $this->assertCount(1, $component->get('diffFiles'));
     }
 
+    public function test_diff_code_lines_do_not_include_template_whitespace(): void
+    {
+        $this->bindSelectableGitServiceMock(fileDiffs: [$this->makeDiffFile('resources/js/app.js')]);
+
+        $component = $this->repoView([
+            'path' => '/fake/repo',
+            'tabId' => 'tab-1',
+            'isActive' => true,
+        ])->call('selectFile', 'resources/js/app.js');
+
+        $document = new \DOMDocument;
+        $previous = libxml_use_internal_errors(true);
+        $document->loadHTML($component->html());
+        libxml_clear_errors();
+        libxml_use_internal_errors($previous);
+
+        $codeLines = (new \DOMXPath($document))->query("//span[contains(concat(' ', normalize-space(@class), ' '), ' whitespace-pre ')]");
+
+        $this->assertSame('before line', $codeLines->item(0)->textContent);
+        $this->assertSame('after line', $codeLines->item(1)->textContent);
+    }
+
     public function test_open_create_branch_from_ref_prefills_the_start_point(): void
     {
         $this->bindGitServiceMock(loadCount: 1);
