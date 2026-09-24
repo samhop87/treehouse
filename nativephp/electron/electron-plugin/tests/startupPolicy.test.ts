@@ -1,7 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { needsOptimization, startupCachePaths } from '../src/server/startupPolicy';
+import { needsOptimization, startupCacheKey, startupCachePaths } from '../src/server/startupPolicy';
 
 describe('startup cache policy', () => {
+    it('uses a fresh cache when the same version moves or is rebuilt', () => {
+        const mounted = startupCacheKey('0.1.0', '/Volumes/Treehouse/Treehouse.app/build/app', 1000);
+        const installed = startupCacheKey('0.1.0', '/Applications/Treehouse.app/build/app', 1000);
+        const rebuilt = startupCacheKey('0.1.0', '/Applications/Treehouse.app/build/app', 2000);
+
+        expect(startupCacheKey('0.1.0', '/Applications/Treehouse.app/build/app', 1000)).toBe(installed);
+        expect(installed).not.toBe(mounted);
+        expect(rebuilt).not.toBe(installed);
+        expect(startupCachePaths('/cache', installed, '/views').config)
+            .not.toBe(startupCachePaths('/cache', mounted, '/views').config);
+    });
+
     it('keeps each application version in its own cache directory', () => {
         const paths = startupCachePaths('/application-support/bootstrap/cache', '1.0.0/beta', '/views');
 

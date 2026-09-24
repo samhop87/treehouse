@@ -12,7 +12,7 @@ import { join } from 'path';
 import { promisify } from 'util';
 import { ProcessResult } from './ProcessResult.js';
 import state from './state.js';
-import { needsOptimization, startupCachePaths, StartupCachePaths } from './startupPolicy.js';
+import { needsOptimization, startupCacheKey, startupCachePaths, StartupCachePaths } from './startupPolicy.js';
 
 // TODO: maybe in dev, don't go to the userData folder and stay in the Laravel app folder
 const storagePath = join(app.getPath('userData'), 'storage');
@@ -383,9 +383,15 @@ function productionCachePaths(): StartupCachePaths | null {
         return null;
     }
 
+    const appPath = getAppPath();
+    const cacheKey = startupCacheKey(
+        String(app.getVersion() || 'unknown'),
+        appPath,
+        statSync(appPath).mtimeMs,
+    );
     const paths = startupCachePaths(
         bootstrapCache,
-        String(app.getVersion() || 'unknown'),
+        cacheKey,
         join(storagePath, 'framework', 'views'),
     );
 
@@ -491,7 +497,7 @@ async function serveApp(secret, apiPort, phpIniSettings): Promise<ProcessResult>
     const cachePaths = productionCachePaths();
     if (cachePaths !== null && needsOptimization(
         store,
-        String(app.getVersion() || 'unknown'),
+        cachePaths.directory,
         cachePaths,
         existsSync,
         process.env.NODE_ENV === 'development',
@@ -503,7 +509,15 @@ async function serveApp(secret, apiPort, phpIniSettings): Promise<ProcessResult>
         if (result.status !== 0) {
             console.error('Failed to cache view and routes:', result.stderr.toString());
         } else {
-            store.set('optimized_version', app.getVersion());
+            store.set('optimized_version', cachePaths.directory);
+        }
+    } else if (cachePaths !== null) {
+        // The NativePHP secret and API port change on every launch, even when
+        // the application files and the rest of the cache are unchanged.
+        const result = callPhpSync(['artisan', 'config:cache'], phpOptions, phpIniSettings);
+
+        if (result.status !== 0) {
+            console.error('Failed to refresh runtime configuration:', result.stderr.toString());
         }
     }
 

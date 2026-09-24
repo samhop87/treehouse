@@ -27,7 +27,7 @@ if (( ${#artifacts[@]} == 0 )); then
     exit 1
 fi
 
-artifact=${artifacts[-1]}
+artifact=${artifacts[1]}
 app_bundle="$dist_dir/mac-arm64/Treehouse.app"
 
 hdiutil verify "$artifact"
